@@ -1,0 +1,79 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Shopify Store",
+        "description": "Enter your Shopify store details. You'll need a custom app with Admin API access.",
+        "data": {
+          "shop_domain": "Shop Domain",
+          "access_token": "Admin API Access Token",
+          "api_version": "API Version",
+          "timezone_override": "Timezone Override (optional)",
+          "include_test_orders": "Include Test Orders",
+          "mock_mode": "Mock Mode (for testing)"
+        },
+        "data_description": {
+          "shop_domain": "Your Shopify store domain (e.g., my-store.myshopify.com or just my-store)",
+          "access_token": "Admin API access token from your Shopify custom app",
+          "api_version": "Shopify API version (leave default unless you have specific requirements)",
+          "timezone_override": "Override the store timezone for date calculations (e.g., Australia/Sydney)",
+          "include_test_orders": "Include test orders in counts and revenue calculations",
+          "mock_mode": "Use mock data instead of real API calls (for testing integration)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Shopify",
+        "description": "The access token for {shop_domain} is no longer valid. Please enter a new access token.",
+        "data": {
+          "access_token": "Admin API Access Token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid access token or insufficient permissions. Ensure read_orders scope is granted.",
+      "cannot_connect": "Unable to connect to Shopify. Please check your internet connection and shop domain.",
+      "invalid_domain": "Shop not found. Please verify the shop domain is correct.",
+      "unknown": "An unexpected error occurred. Check the logs for details."
+    },
+    "abort": {
+      "already_configured": "This Shopify store is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shopify Options",
+        "description": "Configure update interval and data options.",
+        "data": {
+          "scan_interval": "Update Interval",
+          "months_lookback": "Months to Analyze for Busiest Month",
+          "include_test_orders": "Include Test Orders",
+          "timezone_override": "Timezone Override"
+        },
+        "data_description": {
+          "scan_interval": "How often to fetch data from Shopify (in minutes)",
+          "months_lookback": "Number of months to look back when calculating busiest month",
+          "include_test_orders": "Include test orders in counts and revenue calculations",
+          "timezone_override": "Override the store timezone for date calculations"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "unfulfilled_orders_count": {
+        "name": "Unfulfilled Orders"
+      },
+      "current_month_revenue": {
+        "name": "Current Month Revenue"
+      },
+      "total_orders_count": {
+        "name": "Total Orders"
+      },
+      "busiest_month": {
+        "name": "Busiest Month"
+      }
+    }
+  }
+}

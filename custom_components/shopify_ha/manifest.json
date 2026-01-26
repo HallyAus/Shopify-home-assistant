@@ -1,0 +1,13 @@
+{
+  "domain": "shopify_ha",
+  "name": "Shopify Store Integration",
+  "codeowners": ["@HallyAus"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/HallyAus/Shopify-home-assistant",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/HallyAus/Shopify-home-assistant/issues",
+  "requirements": [],
+  "version": "1.0.0",
+  "integration_type": "hub"
+}
