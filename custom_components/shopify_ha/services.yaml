@@ -1,0 +1,5 @@
+# Services for Shopify integration
+# Currently no custom services are exposed.
+# Future services could include:
+# - Force refresh data
+# - Clear cache
