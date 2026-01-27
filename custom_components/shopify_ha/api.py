@@ -351,7 +351,7 @@ class ShopifyGraphQLClient:
                                 "id": f"gid://shopify/Order/{i}",
                                 "name": f"#100{i}",
                                 "createdAt": datetime.now().isoformat(),
-                                "fulfillmentStatus": "UNFULFILLED",
+                                "displayFulfillmentStatus": "UNFULFILLED",
                                 "displayFinancialStatus": "PAID",
                             }
                         }
@@ -374,22 +374,22 @@ class ShopifyGraphQLClient:
                                     now - timedelta(days=i * 10)
                                 ).isoformat(),
                                 "displayFinancialStatus": "PAID",
+                                "displayFulfillmentStatus": "FULFILLED",
                                 "cancelledAt": None,
+                                "closed": False,
                                 "currentTotalPriceSet": {
-                                    "presentmentMoney": {
+                                    "shopMoney": {
                                         "amount": str(100 + i * 50),
                                         "currencyCode": "AUD",
                                     },
+                                },
+                                "netPaymentSet": {
                                     "shopMoney": {
                                         "amount": str(100 + i * 50),
                                         "currencyCode": "AUD",
                                     },
                                 },
                                 "totalRefundedSet": {
-                                    "presentmentMoney": {
-                                        "amount": "0.00",
-                                        "currencyCode": "AUD",
-                                    },
                                     "shopMoney": {
                                         "amount": "0.00",
                                         "currencyCode": "AUD",
@@ -453,26 +453,39 @@ class ShopifyGraphQLClient:
         created_after: datetime | None = None,
         created_before: datetime | None = None,
     ) -> str:
-        """Build Shopify order query string."""
+        """Build Shopify order query string.
+
+        Note for API 2026-01:
+        - fulfillment_status filter values: unfulfilled, unshipped, partial, shipped, fulfilled
+        - Must combine fulfillment_status with status:open or status:any for reliable results
+        - Date format: ISO8601 (e.g., 2024-01-01T00:00:00Z)
+        """
         parts = []
 
         if not self._include_test_orders:
             parts.append("-test:true")
 
+        # Status filter - required when using fulfillment_status for reliable results
         if status_filter:
             parts.append(f"status:{status_filter}")
 
+        # Fulfillment filter - valid values: unfulfilled, unshipped, partial, shipped, fulfilled
         if fulfillment_filter:
             parts.append(f"fulfillment_status:{fulfillment_filter}")
 
+        # Financial filter - valid values: paid, pending, refunded, etc.
         if financial_filter:
             parts.append(f"financial_status:{financial_filter}")
 
+        # Date filters - use ISO8601 format
         if created_after:
-            parts.append(f"created_at:>={created_after.isoformat()}")
+            # Format with explicit UTC timezone
+            date_str = created_after.strftime("%Y-%m-%dT%H:%M:%SZ") if created_after.tzinfo else created_after.isoformat()
+            parts.append(f"created_at:>={date_str}")
 
         if created_before:
-            parts.append(f"created_at:<={created_before.isoformat()}")
+            date_str = created_before.strftime("%Y-%m-%dT%H:%M:%SZ") if created_before.tzinfo else created_before.isoformat()
+            parts.append(f"created_at:<={date_str}")
 
         return " AND ".join(parts) if parts else ""
 
@@ -564,19 +577,13 @@ class ShopifyGraphQLClient:
             for edge in edges:
                 node = edge.get("node", {})
 
-                # Skip cancelled orders
+                # Skip cancelled or closed orders without payment
                 if node.get("cancelledAt"):
                     continue
 
-                # Get total price
-                price_set = node.get("currentTotalPriceSet", {})
-                money = self._extract_aud_amount(price_set)
+                # Extract net revenue using API 2026-01 compatible method
+                net_revenue = self._extract_order_revenue(node)
 
-                # Subtract refunds
-                refund_set = node.get("totalRefundedSet", {})
-                refunded = self._extract_aud_amount(refund_set)
-
-                net_revenue = money - refunded
                 if net_revenue > 0:
                     total_revenue += net_revenue
                     order_count += 1
@@ -588,32 +595,22 @@ class ShopifyGraphQLClient:
 
         return total_revenue, order_count, month_start, month_end
 
-    def _extract_aud_amount(self, price_set: dict[str, Any]) -> Decimal:
-        """Extract AUD amount from a MoneyBag, preferring presentment."""
-        # Try presentment money first (customer's currency)
-        presentment = price_set.get("presentmentMoney", {})
-        if presentment.get("currencyCode") == TARGET_CURRENCY:
-            try:
-                return Decimal(presentment.get("amount", "0"))
-            except (ValueError, TypeError):
-                pass
+    def _extract_amount(self, price_set: dict[str, Any]) -> Decimal:
+        """Extract amount from a MoneyBag, using shopMoney for consistency.
 
-        # Fall back to shop money
+        API 2026-01: Prefer shopMoney for store currency consistency.
+        """
+        if not price_set:
+            return Decimal("0.00")
+
+        # Use shop money for consistent store currency
         shop = price_set.get("shopMoney", {})
-        if shop.get("currencyCode") == TARGET_CURRENCY:
-            try:
-                return Decimal(shop.get("amount", "0"))
-            except (ValueError, TypeError):
-                pass
-
-        # If neither is AUD, log warning and use shop money
-        # (User should be aware of currency mismatch)
         shop_amount = shop.get("amount", "0")
         shop_currency = shop.get("currencyCode", "UNKNOWN")
-        if shop_currency != TARGET_CURRENCY:
-            _LOGGER.warning(
-                "Currency mismatch: shop uses %s, not %s. "
-                "Using shop amount as-is. Consider using a store with AUD currency.",
+
+        if shop_currency and shop_currency != TARGET_CURRENCY:
+            _LOGGER.debug(
+                "Currency note: shop uses %s, target is %s. Using shop amount.",
                 shop_currency,
                 TARGET_CURRENCY,
             )
@@ -622,6 +619,23 @@ class ShopifyGraphQLClient:
             return Decimal(shop_amount)
         except (ValueError, TypeError):
             return Decimal("0.00")
+
+    def _extract_order_revenue(self, node: dict[str, Any]) -> Decimal:
+        """Extract net revenue from an order node.
+
+        API 2026-01: Uses netPaymentSet when available (actual received payment),
+        falls back to currentTotalPriceSet - totalRefundedSet.
+        """
+        # Prefer netPaymentSet - represents actual money received
+        net_payment = node.get("netPaymentSet")
+        if net_payment:
+            return self._extract_amount(net_payment)
+
+        # Fallback: currentTotalPriceSet minus refunds
+        current_total = self._extract_amount(node.get("currentTotalPriceSet", {}))
+        refunded = self._extract_amount(node.get("totalRefundedSet", {}))
+
+        return current_total - refunded
 
     async def get_total_orders_count(self, force_refresh: bool = False) -> int:
         """Get total orders count (all time).
@@ -735,7 +749,7 @@ class ShopifyGraphQLClient:
             for edge in edges:
                 node = edge.get("node", {})
 
-                # Skip cancelled
+                # Skip cancelled orders
                 if node.get("cancelledAt"):
                     continue
 
@@ -750,14 +764,9 @@ class ShopifyGraphQLClient:
                 except (ValueError, TypeError):
                     continue
 
-                # Get revenue
-                price_set = node.get("currentTotalPriceSet", {})
-                amount = self._extract_aud_amount(price_set)
+                # Get net revenue using API 2026-01 compatible method
+                net_revenue = self._extract_order_revenue(node)
 
-                refund_set = node.get("totalRefundedSet", {})
-                refunded = self._extract_aud_amount(refund_set)
-
-                net_revenue = amount - refunded
                 if net_revenue <= 0:
                     continue
 
