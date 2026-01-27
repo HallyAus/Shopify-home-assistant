@@ -22,8 +22,8 @@ CONF_GRANTED_SCOPES: Final = "granted_scopes"
 OAUTH2_AUTHORIZE_URL_TEMPLATE: Final = "https://{shop}/admin/oauth/authorize"
 OAUTH2_TOKEN_URL_TEMPLATE: Final = "https://{shop}/admin/oauth/access_token"
 OAUTH2_SCOPES: Final = ["read_orders"]
-# This MUST match exactly what is registered in the Shopify app settings
-OAUTH2_REDIRECT_URI: Final = "https://homeassistant.printforge.com.au/auth/external/callback"
+# OAuth callback path - will be appended to HA's external URL
+OAUTH2_CALLBACK_PATH: Final = "/auth/external/callback"
 
 # Defaults
 DEFAULT_API_VERSION: Final = "2026-01"
@@ -41,11 +41,23 @@ GRAPHQL_COST_HEADER: Final = "X-GraphQL-Cost-Include-Fields"
 DEFAULT_PAGE_SIZE: Final = 50
 MAX_PAGE_SIZE: Final = 250
 
-# Sensor types
+# Sensor types - Original 4
 SENSOR_UNFULFILLED_ORDERS: Final = "unfulfilled_orders_count"
 SENSOR_CURRENT_MONTH_REVENUE: Final = "current_month_revenue_aud"
 SENSOR_TOTAL_ORDERS: Final = "total_orders_count"
 SENSOR_BUSIEST_MONTH: Final = "busiest_month"
+
+# Sensor types - New 10 sensors
+SENSOR_TODAY_ORDERS: Final = "today_orders_count"
+SENSOR_TODAY_REVENUE: Final = "today_revenue_aud"
+SENSOR_WEEK_ORDERS: Final = "this_week_orders_count"
+SENSOR_WEEK_REVENUE: Final = "this_week_revenue_aud"
+SENSOR_AVERAGE_ORDER_VALUE: Final = "average_order_value_aud"
+SENSOR_PENDING_PAYMENT_ORDERS: Final = "pending_payment_orders_count"
+SENSOR_PARTIALLY_FULFILLED_ORDERS: Final = "partially_fulfilled_orders_count"
+SENSOR_YTD_REVENUE: Final = "year_to_date_revenue_aud"
+SENSOR_LAST_30_DAYS_ORDERS: Final = "last_30_days_orders_count"
+SENSOR_LAST_30_DAYS_REVENUE: Final = "last_30_days_revenue_aud"
 
 # Attributes
 ATTR_CURRENCY: Final = "currency"
@@ -58,6 +70,9 @@ ATTR_MONTH: Final = "month"
 ATTR_REVENUE_AUD: Final = "revenue_aud"
 ATTR_STORE_NAME: Final = "store_name"
 ATTR_SHOP_DOMAIN: Final = "shop_domain"
+ATTR_PERIOD: Final = "period"
+ATTR_YEAR: Final = "year"
+ATTR_WEEK_NUMBER: Final = "week_number"
 
 # Error messages
 ERROR_INVALID_AUTH: Final = "invalid_auth"

@@ -40,7 +40,7 @@
       "invalid_auth": "Invalid credentials or insufficient permissions. Ensure the app has read_orders scope.",
       "cannot_connect": "Unable to connect to Shopify. Please check your internet connection and shop domain.",
       "invalid_domain": "Shop not found. Please verify the shop domain is correct.",
-      "external_url_mismatch": "Home Assistant external URL mismatch. OAuth requires HA to be accessible at https://homeassistant.printforge.com.au. Check your external URL configuration and reverse proxy headers.",
+      "external_url_mismatch": "Home Assistant external URL is not properly configured for OAuth. Ensure you have configured an HTTPS external URL in Settings → System → Network. OAuth will not work with local URLs.",
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {
@@ -90,6 +90,36 @@
       },
       "busiest_month": {
         "name": "Busiest Month"
+      },
+      "today_orders_count": {
+        "name": "Today's Orders"
+      },
+      "today_revenue": {
+        "name": "Today's Revenue"
+      },
+      "week_orders_count": {
+        "name": "This Week's Orders"
+      },
+      "week_revenue": {
+        "name": "This Week's Revenue"
+      },
+      "average_order_value": {
+        "name": "Average Order Value"
+      },
+      "pending_payment_orders": {
+        "name": "Pending Payment Orders"
+      },
+      "partially_fulfilled_orders": {
+        "name": "Partially Fulfilled Orders"
+      },
+      "ytd_revenue": {
+        "name": "Year-to-Date Revenue"
+      },
+      "last_30_days_orders": {
+        "name": "Last 30 Days Orders"
+      },
+      "last_30_days_revenue": {
+        "name": "Last 30 Days Revenue"
       }
     }
   }

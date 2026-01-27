@@ -3,15 +3,40 @@
 [![HACS Custom][hacs-badge]][hacs-url]
 [![GitHub Release][releases-shield]][releases]
 [![License][license-shield]](LICENSE)
+[![Buy Me A Coffee][coffee-badge]][coffee-url]
 
-A custom Home Assistant integration that connects to the Shopify Admin API and exposes sensors for monitoring your store's orders and revenue.
+A custom Home Assistant integration that connects to the Shopify Admin API and exposes **14 sensors** for monitoring your store's orders and revenue.
+
+## Support This Project
+
+If you find this integration useful, consider supporting me!
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/printforge)
+
+**Or use my referral codes:**
+- **Starlink** - Get one free month! [Sign up here](https://starlink.com/residential?referral=RC-2455784-77014-69&app_source=share)
+- **OVO Energy** (Australia) - [Get a discount](https://www.ovoenergy.com.au/refer/daniel16485)
 
 ## Features
 
-- **Unfulfilled Orders Count**: Track orders that are paid but not yet fulfilled
-- **Current Month Revenue (AUD)**: Monitor your store's revenue for the current month
-- **Total Orders Count**: See your all-time order count
-- **Busiest Month**: Identify your highest revenue month with detailed statistics
+### 14 Sensors with Icons
+
+| Icon | Sensor | Description |
+|------|--------|-------------|
+| `mdi:package-variant` | **Unfulfilled Orders** | Orders paid but not yet fulfilled |
+| `mdi:cash-multiple` | **Current Month Revenue** | Revenue for the current month (AUD) |
+| `mdi:cart-check` | **Total Orders** | All-time order count |
+| `mdi:chart-line` | **Busiest Month** | Highest revenue month historically |
+| `mdi:cart-arrow-down` | **Today's Orders** | Orders placed today |
+| `mdi:cash-register` | **Today's Revenue** | Revenue from today's orders |
+| `mdi:calendar-week` | **This Week's Orders** | Orders this week (Mon-Sun) |
+| `mdi:cash-sync` | **This Week's Revenue** | Revenue for the current week |
+| `mdi:cash-marker` | **Average Order Value** | Average order value this month |
+| `mdi:clock-alert-outline` | **Pending Payment Orders** | Orders awaiting payment |
+| `mdi:package-variant-closed-check` | **Partially Fulfilled Orders** | Orders partially shipped |
+| `mdi:calendar-star` | **Year-to-Date Revenue** | Revenue for the current year |
+| `mdi:history` | **Last 30 Days Orders** | Order count in last 30 days |
+| `mdi:chart-areaspline` | **Last 30 Days Revenue** | Revenue in last 30 days |
 
 ### Key Capabilities
 
@@ -38,7 +63,7 @@ If you're using a reverse proxy (nginx, Traefik, etc.), you **MUST** configure t
 
 ```
 X-Forwarded-Proto: https
-X-Forwarded-Host: homeassistant.printforge.com.au
+X-Forwarded-Host: <your-domain>
 ```
 
 **Example nginx configuration:**
@@ -91,10 +116,15 @@ This integration uses **OAuth 2.0 Authorization Code flow** for authentication. 
 
 Your Home Assistant instance **must be publicly accessible via HTTPS** for OAuth to work.
 
-The exact redirect URL used by this integration is:
+The redirect URL is dynamically built from your Home Assistant external URL:
 
 ```
-https://homeassistant.printforge.com.au/auth/external/callback
+https://<your-ha-external-url>/auth/external/callback
+```
+
+**Example:** If your HA is at `https://myha.duckdns.org`, the redirect URL would be:
+```
+https://myha.duckdns.org/auth/external/callback
 ```
 
 **You must add this exact URL** to your Shopify app's Redirect URLs setting.
@@ -110,10 +140,11 @@ https://homeassistant.printforge.com.au/auth/external/callback
 ### Step 2: Configure the App
 
 1. In your app settings, go to **Configuration**
-2. Under **URLs**, add the redirect URL:
+2. Under **URLs**, add your redirect URL:
    ```
-   https://homeassistant.printforge.com.au/auth/external/callback
+   https://<your-ha-external-url>/auth/external/callback
    ```
+   Replace `<your-ha-external-url>` with your actual Home Assistant external URL (e.g., `myha.duckdns.org`)
 3. Under **API access**, configure the required scopes:
    - Enable **`read_orders`** scope
 4. Click **Save**
@@ -136,7 +167,7 @@ https://homeassistant.printforge.com.au/auth/external/callback
 2. Click **Add Integration**
 3. Search for "Shopify Store"
 4. Enter:
-   - **Shop Domain**: Your store domain (e.g., `printforge` or `printforge.myshopify.com`)
+   - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
    - **Client ID**: From your Shopify app
    - **Client Secret**: From your Shopify app
 5. Click **Submit**
@@ -195,50 +226,97 @@ Access options via the integration's **Configure** button:
 
 ## Sensors
 
-### sensor.\<store\>_shopify_unfulfilled_orders_count
+All sensors include these common attributes:
+- `store_name`: Your store's name
+- `shop_domain`: Your store's domain
+- `last_sync`: Timestamp of last data update
+- `api_calls_remaining`: Remaining API capacity
+
+### Original Sensors
+
+#### `mdi:package-variant` sensor.\<store\>_shopify_unfulfilled_orders_count
 
 **State**: Number of unfulfilled paid orders
 
-**Attributes**:
-- `store_name`: Your store's name
-- `shop_domain`: Your store's domain
-- `last_sync`: Timestamp of last data update
-- `api_calls_remaining`: Remaining API capacity
-
-### sensor.\<store\>_shopify_current_month_revenue_aud
+#### `mdi:cash-multiple` sensor.\<store\>_shopify_current_month_revenue_aud
 
 **State**: Current month's revenue in AUD
 
-**Attributes**:
-- `currency`: "AUD"
-- `start_date`: First day of current month
-- `end_date`: Current timestamp
-- `order_count`: Number of orders included
-- `store_name`: Your store's name
-- `last_sync`: Timestamp of last data update
-- `api_calls_remaining`: Remaining API capacity
+**Additional Attributes**: `currency`, `start_date`, `end_date`, `order_count`
 
-### sensor.\<store\>_shopify_total_orders_count
+#### `mdi:cart-check` sensor.\<store\>_shopify_total_orders_count
 
 **State**: Total number of orders (all time)
 
-**Attributes**:
-- `store_name`: Your store's name
-- `shop_domain`: Your store's domain
-- `last_sync`: Timestamp of last data update
-- `api_calls_remaining`: Remaining API capacity
-
-### sensor.\<store\>_shopify_busiest_month
+#### `mdi:chart-line` sensor.\<store\>_shopify_busiest_month
 
 **State**: The busiest month in "YYYY-MM" format
 
-**Attributes**:
-- `month`: Month in "YYYY-MM" format
-- `revenue_aud`: Revenue for that month
-- `order_count`: Number of orders in that month
-- `currency`: "AUD"
-- `store_name`: Your store's name
-- `last_sync`: Timestamp of last data update
+**Additional Attributes**: `month`, `revenue_aud`, `order_count`, `currency`
+
+### New Sensors - Daily Tracking
+
+#### `mdi:cart-arrow-down` sensor.\<store\>_shopify_today_orders_count
+
+**State**: Number of orders placed today
+
+**Additional Attributes**: `start_date`, `end_date`, `period`
+
+#### `mdi:cash-register` sensor.\<store\>_shopify_today_revenue_aud
+
+**State**: Revenue from today's orders in AUD
+
+**Additional Attributes**: `currency`, `order_count`, `start_date`, `end_date`, `period`
+
+### New Sensors - Weekly Tracking
+
+#### `mdi:calendar-week` sensor.\<store\>_shopify_this_week_orders_count
+
+**State**: Number of orders this week (Monday to now)
+
+**Additional Attributes**: `start_date`, `end_date`, `week_number`, `period`
+
+#### `mdi:cash-sync` sensor.\<store\>_shopify_this_week_revenue_aud
+
+**State**: Revenue for the current week in AUD
+
+**Additional Attributes**: `currency`, `order_count`, `start_date`, `end_date`, `week_number`, `period`
+
+### New Sensors - Order Analysis
+
+#### `mdi:cash-marker` sensor.\<store\>_shopify_average_order_value_aud
+
+**State**: Average order value for the current month in AUD
+
+**Additional Attributes**: `currency`, `order_count`, `period`
+
+#### `mdi:clock-alert-outline` sensor.\<store\>_shopify_pending_payment_orders_count
+
+**State**: Number of orders awaiting payment
+
+#### `mdi:package-variant-closed-check` sensor.\<store\>_shopify_partially_fulfilled_orders_count
+
+**State**: Number of orders that are partially fulfilled/shipped
+
+### New Sensors - Long-term Tracking
+
+#### `mdi:calendar-star` sensor.\<store\>_shopify_year_to_date_revenue_aud
+
+**State**: Year-to-date revenue in AUD
+
+**Additional Attributes**: `currency`, `order_count`, `start_date`, `year`, `period`
+
+#### `mdi:history` sensor.\<store\>_shopify_last_30_days_orders_count
+
+**State**: Number of orders in the last 30 days
+
+**Additional Attributes**: `start_date`, `period`
+
+#### `mdi:chart-areaspline` sensor.\<store\>_shopify_last_30_days_revenue_aud
+
+**State**: Revenue from the last 30 days in AUD
+
+**Additional Attributes**: `currency`, `order_count`, `start_date`, `period`
 
 ## Troubleshooting
 
@@ -251,19 +329,17 @@ Access options via the integration's **Configure** button:
 4. Reverse proxy headers are not set correctly
 
 **Solution**:
-1. **Check HA External URL**: Ensure Home Assistant's external URL is exactly:
-   ```
-   https://homeassistant.printforge.com.au
-   ```
-   Configure this in Settings → System → Network → External URL
+1. **Check HA External URL**: Ensure Home Assistant's external URL is configured:
+   - Go to Settings → System → Network → External URL
+   - Must be an HTTPS URL accessible from the internet
 
 2. **Check Reverse Proxy Headers**: Your proxy MUST set these headers:
    ```
    X-Forwarded-Proto: https
-   X-Forwarded-Host: homeassistant.printforge.com.au
+   X-Forwarded-Host: <your-domain>
    ```
 
-3. **Access HA via External URL**: When setting up the integration, you MUST access HA via the external URL (not localhost or local IP). The URL in your browser should be `https://homeassistant.printforge.com.au`.
+3. **Access HA via External URL**: When setting up the integration, you MUST access HA via your external URL (not localhost or local IP).
 
 4. **Complete Setup Quickly**: The OAuth flow has a 10-minute timeout. Complete authorization promptly.
 
@@ -271,13 +347,13 @@ Access options via the integration's **Configure** button:
    ```
    === SHOPIFY OAUTH DEBUG ===
    Flow ID: <uuid>
-   Redirect URI: https://homeassistant.printforge.com.au/auth/external/callback
+   Redirect URI: https://<your-domain>/auth/external/callback
    ```
 
    When the callback arrives:
    ```
    === SHOPIFY OAUTH CALLBACK ===
-   Host header: homeassistant.printforge.com.au
+   Host header: <your-domain>
    Scheme: https
    ```
 
@@ -286,9 +362,9 @@ Access options via the integration's **Configure** button:
 **Cause**: Redirect URL mismatch or Home Assistant not publicly accessible.
 
 **Solution**:
-1. Verify the redirect URL in your Shopify app exactly matches:
+1. Verify the redirect URL in your Shopify app exactly matches your HA external URL:
    ```
-   https://homeassistant.printforge.com.au/auth/external/callback
+   https://<your-ha-external-url>/auth/external/callback
    ```
 2. Ensure your Home Assistant is accessible via HTTPS at the configured URL
 3. Check that no firewall is blocking the callback
@@ -401,10 +477,20 @@ The diagnostics file includes:
 
 This integration uses Shopify's GraphQL Admin API version 2026-01. Here's what happens during each update:
 
+**Original Sensors:**
 1. **Unfulfilled Orders**: Query for open, paid, unfulfilled orders
 2. **Current Month Revenue**: Paginated query for orders in date range
 3. **Total Orders**: Cached count query (refreshed daily)
 4. **Busiest Month**: Paginated query for historical data
+
+**New Sensors (fetched concurrently):**
+5. **Today's Orders/Revenue**: Orders from start of today
+6. **This Week's Orders/Revenue**: Orders since Monday
+7. **Average Order Value**: Calculated from current month data
+8. **Pending Payment Orders**: Open orders with pending payment status
+9. **Partially Fulfilled Orders**: Orders partially shipped
+10. **Year-to-Date Revenue**: Orders from January 1st
+11. **Last 30 Days Orders/Revenue**: Rolling 30-day window
 
 The integration implements:
 - Long-lived access tokens (no refresh needed)
@@ -435,3 +521,5 @@ This is an unofficial integration and is not affiliated with or endorsed by Shop
 [releases-shield]: https://img.shields.io/github/release/HallyAus/Shopify-home-assistant.svg
 [releases]: https://github.com/HallyAus/Shopify-home-assistant/releases
 [license-shield]: https://img.shields.io/github/license/HallyAus/Shopify-home-assistant.svg
+[coffee-badge]: https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow?logo=buy-me-a-coffee
+[coffee-url]: https://buymeacoffee.com/printforge
