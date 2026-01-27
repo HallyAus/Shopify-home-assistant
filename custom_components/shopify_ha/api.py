@@ -84,6 +84,7 @@ class MonthlyRevenue:
 class ShopifyData:
     """Container for all Shopify data."""
 
+    # Original 4 sensors
     unfulfilled_orders_count: int = 0
     current_month_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
     current_month_order_count: int = 0
@@ -91,6 +92,38 @@ class ShopifyData:
     busiest_month: str | None = None
     busiest_month_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
     busiest_month_order_count: int = 0
+
+    # New sensors - Today
+    today_orders_count: int = 0
+    today_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
+    today_start: datetime | None = None
+    today_end: datetime | None = None
+
+    # New sensors - This Week
+    week_orders_count: int = 0
+    week_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
+    week_start: datetime | None = None
+    week_end: datetime | None = None
+    week_number: int = 0
+
+    # New sensors - Average Order Value
+    average_order_value_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
+
+    # New sensors - Order Status
+    pending_payment_orders_count: int = 0
+    partially_fulfilled_orders_count: int = 0
+
+    # New sensors - Year to Date
+    ytd_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
+    ytd_order_count: int = 0
+    year_start: datetime | None = None
+
+    # New sensors - Last 30 Days
+    last_30_days_orders_count: int = 0
+    last_30_days_revenue_aud: Decimal = field(default_factory=lambda: Decimal("0.00"))
+    last_30_days_start: datetime | None = None
+
+    # Common fields
     currency: str = TARGET_CURRENCY
     api_calls_remaining: int | None = None
     last_sync: datetime | None = None
@@ -701,6 +734,334 @@ class ShopifyGraphQLClient:
         self._total_orders_last_update = now
         return count
 
+    def _get_today_boundaries(self) -> tuple[datetime, datetime]:
+        """Get the start and end of today."""
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return today_start, now
+
+    def _get_week_boundaries(self) -> tuple[datetime, datetime, int]:
+        """Get the start and end of the current week (Monday-based)."""
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+        # Monday is 0, Sunday is 6
+        days_since_monday = now.weekday()
+        week_start = (now - timedelta(days=days_since_monday)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        week_number = now.isocalendar()[1]
+        return week_start, now, week_number
+
+    def _get_year_start(self) -> datetime:
+        """Get the start of the current year."""
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def _get_30_days_ago(self) -> datetime:
+        """Get the datetime 30 days ago."""
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+        return (now - timedelta(days=30)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+    async def get_today_data(self) -> tuple[int, Decimal, datetime, datetime]:
+        """Get today's orders count and revenue.
+
+        Returns:
+            Tuple of (order_count, revenue, today_start, today_end)
+        """
+        today_start, today_end = self._get_today_boundaries()
+
+        query_filter = self._build_order_query(
+            financial_filter="paid",
+            created_after=today_start,
+            created_before=today_end,
+        )
+
+        total_revenue = Decimal("0.00")
+        order_count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": MAX_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_REVENUE_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+
+            for edge in edges:
+                node = edge.get("node", {})
+                if node.get("cancelledAt"):
+                    continue
+                net_revenue = self._extract_order_revenue(node)
+                if net_revenue > 0:
+                    total_revenue += net_revenue
+                    order_count += 1
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return order_count, total_revenue, today_start, today_end
+
+    async def get_week_data(self) -> tuple[int, Decimal, datetime, datetime, int]:
+        """Get this week's orders count and revenue (Monday-based).
+
+        Returns:
+            Tuple of (order_count, revenue, week_start, week_end, week_number)
+        """
+        week_start, week_end, week_number = self._get_week_boundaries()
+
+        query_filter = self._build_order_query(
+            financial_filter="paid",
+            created_after=week_start,
+            created_before=week_end,
+        )
+
+        total_revenue = Decimal("0.00")
+        order_count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": MAX_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_REVENUE_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+
+            for edge in edges:
+                node = edge.get("node", {})
+                if node.get("cancelledAt"):
+                    continue
+                net_revenue = self._extract_order_revenue(node)
+                if net_revenue > 0:
+                    total_revenue += net_revenue
+                    order_count += 1
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return order_count, total_revenue, week_start, week_end, week_number
+
+    async def get_pending_payment_orders_count(self) -> int:
+        """Get count of orders with pending payment."""
+        query_filter = self._build_order_query(
+            status_filter="open",
+            financial_filter="pending",
+        )
+
+        try:
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_COUNT_QUERY,
+                {"query": query_filter},
+            )
+            if data.get("ordersCount"):
+                return data["ordersCount"]["count"]
+        except ShopifyAPIError:
+            pass
+
+        # Fallback: count via pagination
+        count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": DEFAULT_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_UNFULFILLED_ORDERS_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+            count += len(edges)
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return count
+
+    async def get_partially_fulfilled_orders_count(self) -> int:
+        """Get count of partially fulfilled orders."""
+        query_filter = self._build_order_query(
+            status_filter="open",
+            fulfillment_filter="partial",
+            financial_filter="paid",
+        )
+
+        try:
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_COUNT_QUERY,
+                {"query": query_filter},
+            )
+            if data.get("ordersCount"):
+                return data["ordersCount"]["count"]
+        except ShopifyAPIError:
+            pass
+
+        # Fallback: count via pagination
+        count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": DEFAULT_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_UNFULFILLED_ORDERS_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+            count += len(edges)
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return count
+
+    async def get_ytd_revenue(self) -> tuple[Decimal, int, datetime]:
+        """Get year-to-date revenue.
+
+        Returns:
+            Tuple of (revenue, order_count, year_start)
+        """
+        year_start = self._get_year_start()
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+
+        query_filter = self._build_order_query(
+            financial_filter="paid",
+            created_after=year_start,
+            created_before=now,
+        )
+
+        total_revenue = Decimal("0.00")
+        order_count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": MAX_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_REVENUE_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+
+            for edge in edges:
+                node = edge.get("node", {})
+                if node.get("cancelledAt"):
+                    continue
+                net_revenue = self._extract_order_revenue(node)
+                if net_revenue > 0:
+                    total_revenue += net_revenue
+                    order_count += 1
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return total_revenue, order_count, year_start
+
+    async def get_last_30_days_data(self) -> tuple[int, Decimal, datetime]:
+        """Get last 30 days orders count and revenue.
+
+        Returns:
+            Tuple of (order_count, revenue, start_date)
+        """
+        start_date = self._get_30_days_ago()
+        tz = self._get_timezone()
+        now = datetime.now(tz)
+
+        query_filter = self._build_order_query(
+            financial_filter="paid",
+            created_after=start_date,
+            created_before=now,
+        )
+
+        total_revenue = Decimal("0.00")
+        order_count = 0
+        cursor: str | None = None
+
+        while True:
+            variables = {
+                "first": MAX_PAGE_SIZE,
+                "query": query_filter,
+            }
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._execute_graphql(
+                GRAPHQL_ORDERS_REVENUE_QUERY,
+                variables,
+            )
+
+            orders = data.get("orders", {})
+            edges = orders.get("edges", [])
+
+            for edge in edges:
+                node = edge.get("node", {})
+                if node.get("cancelledAt"):
+                    continue
+                net_revenue = self._extract_order_revenue(node)
+                if net_revenue > 0:
+                    total_revenue += net_revenue
+                    order_count += 1
+
+            page_info = orders.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return order_count, total_revenue, start_date
+
     async def get_busiest_month(
         self, months_lookback: int = 24
     ) -> tuple[str | None, Decimal, int]:
@@ -810,6 +1171,7 @@ class ShopifyGraphQLClient:
         result.currency = TARGET_CURRENCY
 
         # Fetch all data concurrently where possible
+        # Original 4 sensors
         unfulfilled_task = asyncio.create_task(
             self.get_unfulfilled_orders_count()
         )
@@ -823,7 +1185,27 @@ class ShopifyGraphQLClient:
             self.get_busiest_month(months_lookback)
         )
 
-        # Wait for all with error handling
+        # New 10 sensors
+        today_task = asyncio.create_task(
+            self.get_today_data()
+        )
+        week_task = asyncio.create_task(
+            self.get_week_data()
+        )
+        pending_task = asyncio.create_task(
+            self.get_pending_payment_orders_count()
+        )
+        partial_task = asyncio.create_task(
+            self.get_partially_fulfilled_orders_count()
+        )
+        ytd_task = asyncio.create_task(
+            self.get_ytd_revenue()
+        )
+        last_30_task = asyncio.create_task(
+            self.get_last_30_days_data()
+        )
+
+        # Wait for all with error handling - Original sensors
         try:
             result.unfulfilled_orders_count = await unfulfilled_task
         except Exception as err:
@@ -836,6 +1218,9 @@ class ShopifyGraphQLClient:
             result.current_month_order_count = count
             result.month_start = start
             result.month_end = end
+            # Calculate average order value
+            if count > 0:
+                result.average_order_value_aud = revenue / count
         except Exception as err:
             _LOGGER.error("Failed to get current month revenue: %s", err)
 
@@ -852,6 +1237,52 @@ class ShopifyGraphQLClient:
             result.busiest_month_order_count = count
         except Exception as err:
             _LOGGER.error("Failed to get busiest month: %s", err)
+
+        # Wait for new sensors
+        try:
+            count, revenue, start, end = await today_task
+            result.today_orders_count = count
+            result.today_revenue_aud = revenue
+            result.today_start = start
+            result.today_end = end
+        except Exception as err:
+            _LOGGER.error("Failed to get today's data: %s", err)
+
+        try:
+            count, revenue, start, end, week_num = await week_task
+            result.week_orders_count = count
+            result.week_revenue_aud = revenue
+            result.week_start = start
+            result.week_end = end
+            result.week_number = week_num
+        except Exception as err:
+            _LOGGER.error("Failed to get week data: %s", err)
+
+        try:
+            result.pending_payment_orders_count = await pending_task
+        except Exception as err:
+            _LOGGER.error("Failed to get pending payment orders: %s", err)
+
+        try:
+            result.partially_fulfilled_orders_count = await partial_task
+        except Exception as err:
+            _LOGGER.error("Failed to get partially fulfilled orders: %s", err)
+
+        try:
+            revenue, count, year_start = await ytd_task
+            result.ytd_revenue_aud = revenue
+            result.ytd_order_count = count
+            result.year_start = year_start
+        except Exception as err:
+            _LOGGER.error("Failed to get YTD revenue: %s", err)
+
+        try:
+            count, revenue, start = await last_30_task
+            result.last_30_days_orders_count = count
+            result.last_30_days_revenue_aud = revenue
+            result.last_30_days_start = start
+        except Exception as err:
+            _LOGGER.error("Failed to get last 30 days data: %s", err)
 
         # Track API calls remaining
         result.api_calls_remaining = int(self._available_points)

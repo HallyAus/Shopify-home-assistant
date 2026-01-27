@@ -3,12 +3,12 @@
 This implementation uses Home Assistant's OAuth2 callback mechanism with JWT-encoded
 state for proper security and flow matching.
 
-IMPORTANT: The callback URL must exactly match what's registered in your Shopify app:
-https://homeassistant.printforge.com.au/auth/external/callback
+The callback URL is dynamically built from your HA external URL:
+<your-ha-external-url>/auth/external/callback
 
-Required reverse proxy headers:
+Required reverse proxy headers for OAuth to work:
 - X-Forwarded-Proto: https
-- X-Forwarded-Host: homeassistant.printforge.com.au
+- X-Forwarded-Host: <your-domain>
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     OAUTH2_AUTHORIZE_URL_TEMPLATE,
-    OAUTH2_REDIRECT_URI,
+    OAUTH2_CALLBACK_PATH,
     OAUTH2_SCOPES,
 )
 from .oauth import (
@@ -76,9 +76,6 @@ _LOGGER = logging.getLogger(__name__)
 # Use the same JWT secret key as HA's OAuth2 flow helper
 # This allows the OAuth2AuthorizeCallbackView to decode our state
 DATA_JWT_SECRET = "oauth2_jwt_secret"
-
-# Expected redirect URI host for validation
-EXPECTED_CALLBACK_HOST = "homeassistant.printforge.com.au"
 
 
 def _encode_jwt(hass: HomeAssistant, data: dict[str, Any]) -> str:
@@ -107,19 +104,32 @@ def _get_ha_external_url(hass: HomeAssistant) -> str | None:
         return None
 
 
-def _validate_external_url(hass: HomeAssistant) -> tuple[bool, str | None]:
-    """Validate that HA's external URL matches the expected callback host.
+def _get_redirect_uri(hass: HomeAssistant) -> str | None:
+    """Build the OAuth redirect URI from HA's external URL.
+
+    Returns None if external URL is not configured.
+    """
+    external_url = _get_ha_external_url(hass)
+    if not external_url:
+        return None
+    # Remove trailing slash and append callback path
+    return external_url.rstrip("/") + OAUTH2_CALLBACK_PATH
+
+
+def _validate_external_url(hass: HomeAssistant) -> tuple[bool, str | None, str | None]:
+    """Validate that HA's external URL is properly configured for OAuth.
 
     Returns:
-        Tuple of (is_valid, error_message)
+        Tuple of (is_valid, error_message, redirect_uri)
     """
     external_url = _get_ha_external_url(hass)
 
     if not external_url:
         return False, (
-            f"Home Assistant external URL is not configured. "
-            f"OAuth requires HA to be accessible at https://{EXPECTED_CALLBACK_HOST}"
-        )
+            "Home Assistant external URL is not configured. "
+            "Go to Settings → System → Network and configure your External URL. "
+            "OAuth requires HA to be accessible via HTTPS from the internet."
+        ), None
 
     parsed = urlparse(external_url)
 
@@ -130,23 +140,24 @@ def _validate_external_url(hass: HomeAssistant) -> tuple[bool, str | None]:
         parsed.netloc,
     )
 
-    # Check scheme
+    # Check scheme - must be HTTPS for OAuth
     if parsed.scheme != "https":
         return False, (
-            f"Home Assistant external URL must use HTTPS. "
-            f"Current: {external_url}"
-        )
+            f"Home Assistant external URL must use HTTPS for OAuth. "
+            f"Current: {external_url}. "
+            f"Configure HTTPS in Settings → System → Network."
+        ), None
 
-    # Check host (remove port if present)
-    host = parsed.netloc.split(":")[0]
-    if host != EXPECTED_CALLBACK_HOST:
+    # Check for localhost/local IPs which won't work
+    host = parsed.netloc.split(":")[0].lower()
+    if host in ("localhost", "127.0.0.1", "::1") or host.startswith("192.168.") or host.startswith("10."):
         return False, (
-            f"Home Assistant external URL host mismatch. "
-            f"Expected: {EXPECTED_CALLBACK_HOST}, Got: {host}. "
-            f"OAuth callback will not work with local URLs."
-        )
+            f"OAuth callback will not work with local URLs ({host}). "
+            f"Configure a public external URL in Settings → System → Network."
+        ), None
 
-    return True, None
+    redirect_uri = external_url.rstrip("/") + OAUTH2_CALLBACK_PATH
+    return True, None, redirect_uri
 
 
 def get_options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -214,6 +225,7 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         self._shop_domain: str | None = None
         self._client_id: str | None = None
         self._client_secret: str | None = None
+        self._redirect_uri: str | None = None
         self._reauth_entry: ConfigEntry | None = None
 
     @staticmethod
@@ -234,14 +246,14 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         # Create JWT-encoded state matching HA's OAuth2 callback expectations
         state_data = {
             "flow_id": self.flow_id,
-            "redirect_uri": OAUTH2_REDIRECT_URI,
+            "redirect_uri": self._redirect_uri,
         }
         encoded_state = _encode_jwt(self.hass, state_data)
 
         params = {
             "client_id": self._client_id,
             "scope": ",".join(OAUTH2_SCOPES),
-            "redirect_uri": OAUTH2_REDIRECT_URI,
+            "redirect_uri": self._redirect_uri,
             "state": encoded_state,
         }
 
@@ -259,12 +271,12 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             "===========================",
             self.flow_id,
             shop,
-            OAUTH2_REDIRECT_URI,
+            self._redirect_uri,
             ",".join(OAUTH2_SCOPES),
             base_url,
-            OAUTH2_REDIRECT_URI,
+            self._redirect_uri,
             self.flow_id,
-            OAUTH2_REDIRECT_URI,
+            self._redirect_uri,
         )
 
         return auth_url
@@ -274,6 +286,9 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle the initial step - collect shop domain and credentials."""
         errors: dict[str, str] = {}
+
+        # Get the redirect URI for display
+        redirect_uri = _get_redirect_uri(self.hass) or "<configure external URL first>"
 
         if user_input is not None:
             # Normalize and validate shop domain
@@ -291,8 +306,8 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             self._client_id = client_id
             self._client_secret = client_secret
 
-            # Validate HA external URL matches expected callback host
-            is_valid, error_msg = _validate_external_url(self.hass)
+            # Validate HA external URL is properly configured
+            is_valid, error_msg, validated_redirect_uri = _validate_external_url(self.hass)
             if not is_valid:
                 _LOGGER.error("External URL validation failed: %s", error_msg)
                 errors["base"] = "external_url_mismatch"
@@ -318,10 +333,13 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                     errors=errors,
                     description_placeholders={
-                        "redirect_uri": OAUTH2_REDIRECT_URI,
-                        "error_details": error_msg,
+                        "redirect_uri": redirect_uri,
+                        "error_details": error_msg or "",
                     },
                 )
+
+            # Store the validated redirect URI
+            self._redirect_uri = validated_redirect_uri
 
             # Proceed to OAuth authorization
             return await self.async_step_auth()
@@ -344,7 +362,7 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
             description_placeholders={
-                "redirect_uri": OAUTH2_REDIRECT_URI,
+                "redirect_uri": redirect_uri,
             },
         )
 
@@ -543,17 +561,22 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle reauth confirmation - start OAuth flow again."""
         errors: dict[str, str] = {}
 
+        # Get the redirect URI for display
+        redirect_uri = _get_redirect_uri(self.hass) or "<configure external URL first>"
+
         if user_input is not None:
             # Update credentials if changed
             self._client_id = user_input.get(CONF_CLIENT_ID, self._client_id)
             self._client_secret = user_input.get(CONF_CLIENT_SECRET, self._client_secret)
 
             # Validate HA external URL
-            is_valid, error_msg = _validate_external_url(self.hass)
+            is_valid, error_msg, validated_redirect_uri = _validate_external_url(self.hass)
             if not is_valid:
                 _LOGGER.error("External URL validation failed: %s", error_msg)
                 errors["base"] = "external_url_mismatch"
             else:
+                # Store the validated redirect URI
+                self._redirect_uri = validated_redirect_uri
                 # Proceed to OAuth
                 return await self.async_step_auth()
 
@@ -574,7 +597,7 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "shop_domain": self._shop_domain,
-                "redirect_uri": OAUTH2_REDIRECT_URI,
+                "redirect_uri": redirect_uri,
             },
         )
 
