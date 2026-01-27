@@ -16,18 +16,21 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 ### Key Capabilities
 
 - Uses Shopify's GraphQL Admin API for efficient data fetching
+- **Two authentication methods**: OAuth (recommended) or manual access token
 - Supports multiple stores (add multiple config entries)
 - Configurable update interval (default: 15 minutes)
 - Smart caching to minimize API calls
 - Automatic rate limiting handling
 - Mock mode for testing without real API calls
-- Full diagnostics support with token redaction
+- Full diagnostics support with credential redaction
 
 ## Requirements
 
 - Home Assistant 2024.12 or newer
 - A Shopify store with Admin API access
-- A custom app access token with `read_orders` scope
+- Either:
+  - A Shopify Partners app with Client ID and Client Secret (OAuth method), OR
+  - A custom app access token with `read_orders` scope (manual method)
 
 ## Installation
 
@@ -47,11 +50,63 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 2. Copy it to your Home Assistant's `custom_components` directory
 3. Restart Home Assistant
 
-## Creating a Shopify Custom App
+## Authentication Methods
 
-To use this integration, you need to create a custom app in your Shopify admin:
+This integration supports two authentication methods:
 
-### Step 1: Create the App
+### Method 1: OAuth (Recommended)
+
+OAuth is the recommended method as it's more secure and follows Shopify's best practices.
+
+#### Step 1: Create a Shopify Partners App
+
+1. Go to [Shopify Partners](https://partners.shopify.com/) and log in
+2. Click **Apps** → **Create app**
+3. Choose **Create app manually**
+4. Enter an app name (e.g., "Home Assistant Integration")
+5. Click **Create**
+
+#### Step 2: Configure the App
+
+1. In your app settings, go to **Configuration**
+2. Set the **App URL** to your Home Assistant external URL (e.g., `https://homeassistant.yourdomain.com`)
+3. Add **Allowed redirection URL(s)**:
+   - `https://homeassistant.yourdomain.com/auth/external/callback`
+4. Under **Access scopes**, add:
+   - `read_orders`
+5. Click **Save**
+
+#### Step 3: Get Client Credentials
+
+1. Go to **Client credentials** in your app
+2. Copy the **Client ID**
+3. Copy the **Client secret**
+
+#### Step 4: Install the App on Your Store
+
+1. In the app settings, go to **Test your app**
+2. Select your development store
+3. Click **Install app**
+
+#### Step 5: Configure Home Assistant
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration**
+3. Search for "Shopify Store"
+4. Select **OAuth (Recommended)**
+5. Enter:
+   - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
+   - **Client ID**: From Shopify Partners
+   - **Client Secret**: From Shopify Partners
+6. You'll be redirected to Shopify to authorize
+7. Approve the permissions
+8. You'll be redirected back to Home Assistant
+
+### Method 2: Manual Access Token
+
+Use this method if you prefer a simpler setup or don't have access to Shopify Partners.
+
+#### Step 1: Create a Custom App in Shopify Admin
 
 1. Log in to your Shopify admin panel
 2. Go to **Settings** → **Apps and sales channels**
@@ -60,18 +115,28 @@ To use this integration, you need to create a custom app in your Shopify admin:
 5. Name your app (e.g., "Home Assistant Integration")
 6. Click **Create app**
 
-### Step 2: Configure API Scopes
+#### Step 2: Configure API Scopes
 
 1. In your new app, click **Configure Admin API scopes**
 2. Find and enable **`read_orders`** (under Orders section)
-3. Optionally enable **`read_products`** if you want future product sensors
-4. Click **Save**
+3. Click **Save**
 
-### Step 3: Get Your Access Token
+#### Step 3: Get Your Access Token
 
 1. Click **Install app** to install it on your store
 2. Click **Reveal token once** to see your Admin API access token
 3. **IMPORTANT**: Copy and save this token securely - it's only shown once!
+
+#### Step 4: Configure Home Assistant
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration**
+3. Search for "Shopify Store"
+4. Select **Manual Access Token**
+5. Enter:
+   - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
+   - **Admin API Access Token**: The token you copied
+6. Click **Submit**
 
 ### Required Scopes
 
@@ -79,20 +144,20 @@ To use this integration, you need to create a custom app in your Shopify admin:
 |-------|---------|
 | `read_orders` | Required for all sensors (orders, revenue, etc.) |
 
-## Configuration
+## Configuration Options
 
-### Adding the Integration
+### Initial Setup
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for "Shopify Store"
-4. Enter your configuration:
-   - **Shop Domain**: Your store's domain (e.g., `my-store.myshopify.com` or just `my-store`)
-   - **Admin API Access Token**: The token from your custom app
-   - **API Version**: Leave as default unless you have specific requirements
-   - **Timezone Override**: Optional - override the timezone for date calculations
-   - **Include Test Orders**: Whether to include test orders in calculations
-   - **Mock Mode**: Use mock data for testing (no real API calls)
+| Option | Description |
+|--------|-------------|
+| Shop Domain | Your Shopify store domain |
+| Client ID | OAuth client ID (OAuth method only) |
+| Client Secret | OAuth client secret (OAuth method only) |
+| Access Token | Admin API token (manual method only) |
+| API Version | Shopify API version (default: 2024-10) |
+| Timezone Override | Override store timezone for calculations |
+| Include Test Orders | Include test orders in counts |
+| Mock Mode | Use mock data for testing |
 
 ### Options (Configurable After Setup)
 
@@ -154,15 +219,24 @@ Access options via the integration's **Configure** button:
 
 ## Troubleshooting
 
+### OAuth: Redirect URL Mismatch
+
+**Cause**: The redirect URL in Home Assistant doesn't match what's configured in Shopify.
+
+**Solution**:
+1. Ensure your Home Assistant external URL is correctly set in **Settings** → **System** → **Network**
+2. Add the exact redirect URL to your Shopify app's allowed redirection URLs
+3. The format should be: `https://your-ha-domain/auth/external/callback`
+
 ### Error: Invalid access token or insufficient permissions (401/403)
 
 **Cause**: The access token is invalid or doesn't have the required scopes.
 
 **Solution**:
-1. Verify your access token is correct
-2. Ensure the custom app has `read_orders` scope enabled
-3. Reinstall the app in Shopify if you recently changed scopes
-4. Generate a new access token if needed
+1. Verify your access token/credentials are correct
+2. Ensure the app has `read_orders` scope enabled
+3. For OAuth: Re-authorize the app
+4. For manual: Generate a new access token
 
 ### Error: Unable to connect to Shopify
 
@@ -209,7 +283,7 @@ Access options via the integration's **Configure** button:
 
 **Solution**:
 1. Check the Home Assistant logs for errors
-2. Verify your access token has the correct permissions
+2. Verify your credentials have the correct permissions
 3. Try removing and re-adding the integration
 4. Enable debug logging for more details
 
@@ -262,7 +336,7 @@ Replace `YOUR-STORE` with your shop domain and `YOUR_ACCESS_TOKEN` with your tok
 3. Click the three dots menu → **Download diagnostics**
 
 The diagnostics file includes:
-- Configuration (with token redacted)
+- Configuration (with credentials redacted)
 - Current sensor data
 - Shop information
 - Coordinator status
