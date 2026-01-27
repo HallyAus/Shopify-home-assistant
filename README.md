@@ -32,6 +32,39 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 - A Shopify store with Admin API access
 - A Shopify custom app with Client ID and Client Secret
 
+### Reverse Proxy Configuration
+
+If you're using a reverse proxy (nginx, Traefik, etc.), you **MUST** configure these headers for OAuth to work correctly:
+
+```
+X-Forwarded-Proto: https
+X-Forwarded-Host: homeassistant.printforge.com.au
+```
+
+**Example nginx configuration:**
+```nginx
+location / {
+    proxy_pass http://homeassistant:8123;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+}
+```
+
+**Example Traefik configuration:**
+```yaml
+http:
+  middlewares:
+    headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+```
+
+Without these headers, Home Assistant cannot determine the correct external URL for OAuth callbacks.
+
 ## Installation
 
 ### HACS (Recommended)

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Shopify Store",
-        "description": "Enter your Shopify custom app credentials. You will be redirected to Shopify to authorize the app.\n\n**Redirect URL:** {redirect_uri}\n\nMake sure this URL is added to your Shopify app's Redirect URLs.",
+        "description": "Enter your Shopify custom app credentials. You will be redirected to Shopify to authorize the app.\n\n**Redirect URL:** {redirect_uri}\n\nMake sure this URL is added to your Shopify app's Redirect URLs.\n\n**Important:** You must access Home Assistant via the external URL (not localhost or local IP).",
         "data": {
           "shop_domain": "Shop Domain",
           "client_id": "Client ID",
@@ -18,16 +18,6 @@
       "authorize": {
         "title": "Authorize with Shopify",
         "description": "Please complete the authorization on Shopify. You will be redirected back to Home Assistant after approving the app."
-      },
-      "callback": {
-        "title": "OAuth Callback",
-        "description": "If the automatic callback failed, you can manually enter the callback parameters.\n\nExpected state: {expected_state}",
-        "data": {
-          "code": "Authorization Code",
-          "state": "State",
-          "hmac": "HMAC (optional)",
-          "shop": "Shop (optional)"
-        }
       },
       "reauth_confirm": {
         "title": "Re-authenticate Shopify",

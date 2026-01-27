@@ -9,13 +9,15 @@ Flow:
 3. Shopify redirects back with authorization code and HMAC
 4. We verify HMAC and exchange code for access token
 5. Access token is stored in config entry
+
+IMPORTANT: The config_flow uses HA's flow_id as the OAuth state parameter.
+This ensures Home Assistant can match the callback to the correct flow.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
 import logging
-import secrets
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,9 +26,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    OAUTH2_AUTHORIZE_URL_TEMPLATE,
-    OAUTH2_REDIRECT_URI,
-    OAUTH2_SCOPES,
     OAUTH2_TOKEN_URL_TEMPLATE,
 )
 
@@ -71,46 +70,6 @@ def normalize_shop_domain(domain: str) -> str:
             domain = f"{domain}.myshopify.com"
 
     return domain
-
-
-def generate_state() -> str:
-    """Generate a cryptographically secure state parameter.
-
-    Returns:
-        A random 32-character hex string
-    """
-    return secrets.token_hex(16)
-
-
-def build_authorization_url(
-    shop_domain: str,
-    client_id: str,
-    state: str,
-    scopes: list[str] | None = None,
-) -> str:
-    """Build the Shopify OAuth authorization URL.
-
-    Args:
-        shop_domain: The shop domain (e.g., my-store.myshopify.com)
-        client_id: The app's client ID
-        state: Random state parameter for CSRF protection
-        scopes: List of requested scopes (defaults to OAUTH2_SCOPES)
-
-    Returns:
-        The complete authorization URL
-    """
-    shop = normalize_shop_domain(shop_domain)
-    scopes = scopes or OAUTH2_SCOPES
-
-    params = {
-        "client_id": client_id,
-        "scope": ",".join(scopes),
-        "redirect_uri": OAUTH2_REDIRECT_URI,
-        "state": state,
-    }
-
-    base_url = OAUTH2_AUTHORIZE_URL_TEMPLATE.format(shop=shop)
-    return f"{base_url}?{urlencode(params)}"
 
 
 def verify_hmac(
