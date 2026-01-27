@@ -8,9 +8,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import CONF_GRANTED_SCOPES, DOMAIN
 from .coordinator import ShopifyDataUpdateCoordinator
-from .oauth import ShopifyTokenManager
+from .oauth import mask_token
 
 # Keys to redact from diagnostics
 TO_REDACT = {
@@ -31,10 +31,13 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     entry_data = hass.data[DOMAIN][entry.entry_id]
     coordinator: ShopifyDataUpdateCoordinator = entry_data["coordinator"]
-    token_manager: ShopifyTokenManager | None = entry_data.get("token_manager")
 
     # Build diagnostics data
     data = coordinator.data
+
+    # Get token info with masking (show last 4 chars only)
+    access_token = entry.data.get(CONF_ACCESS_TOKEN, "")
+    granted_scopes = entry.data.get(CONF_GRANTED_SCOPES, "")
 
     diagnostics_data: dict[str, Any] = {
         "config_entry": {
@@ -44,6 +47,11 @@ async def async_get_config_entry_diagnostics(
             "title": entry.title,
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": dict(entry.options),
+        },
+        "authentication": {
+            "has_token": bool(access_token),
+            "token_last4": mask_token(access_token),
+            "granted_scopes": granted_scopes,
         },
         "coordinator": {
             "shop_domain": coordinator.shop_domain,
@@ -56,10 +64,6 @@ async def async_get_config_entry_diagnostics(
             ),
         },
     }
-
-    # Add token manager info (with masking)
-    if token_manager:
-        diagnostics_data["token_manager"] = token_manager.get_token_info()
 
     if data:
         diagnostics_data["data"] = {

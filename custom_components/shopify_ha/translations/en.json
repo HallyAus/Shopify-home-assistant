@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Shopify Store",
-        "description": "Enter your Shopify custom app credentials. Uses OAuth 2.0 client credentials grant for authentication.",
+        "description": "Enter your Shopify custom app credentials. You will be redirected to Shopify to authorize the app.\n\n**Redirect URL:** {redirect_uri}\n\nMake sure this URL is added to your Shopify app's Redirect URLs.",
         "data": {
           "shop_domain": "Shop Domain",
           "client_id": "Client ID",
@@ -15,9 +15,23 @@
           "client_secret": "Client Secret from your Shopify custom app"
         }
       },
+      "authorize": {
+        "title": "Authorize with Shopify",
+        "description": "Please complete the authorization on Shopify. You will be redirected back to Home Assistant after approving the app."
+      },
+      "callback": {
+        "title": "OAuth Callback",
+        "description": "If the automatic callback failed, you can manually enter the callback parameters.\n\nExpected state: {expected_state}",
+        "data": {
+          "code": "Authorization Code",
+          "state": "State",
+          "hmac": "HMAC (optional)",
+          "shop": "Shop (optional)"
+        }
+      },
       "reauth_confirm": {
         "title": "Re-authenticate Shopify",
-        "description": "The access token for {shop_domain} is no longer valid. Please enter your updated credentials.",
+        "description": "The access token for {shop_domain} is no longer valid. Enter your credentials to re-authorize.\n\n**Redirect URL:** {redirect_uri}",
         "data": {
           "client_id": "Client ID",
           "client_secret": "Client Secret"
@@ -36,7 +50,14 @@
     },
     "abort": {
       "already_configured": "This Shopify store is already configured.",
-      "reauth_successful": "Re-authentication was successful."
+      "reauth_successful": "Re-authentication was successful.",
+      "oauth_state_mismatch": "OAuth state mismatch. Please try again.",
+      "invalid_hmac": "HMAC verification failed. The callback may be invalid.",
+      "no_auth_code": "No authorization code received from Shopify.",
+      "token_exchange_failed": "Failed to exchange authorization code for access token.",
+      "invalid_auth": "Authentication failed. Please verify your credentials.",
+      "cannot_connect": "Unable to connect to Shopify.",
+      "unknown": "An unexpected error occurred."
     }
   },
   "options": {
