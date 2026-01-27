@@ -173,6 +173,13 @@ class ShopifyGraphQLClient:
             await self._session.close()
             self._session = None
 
+    def update_access_token(self, access_token: str) -> None:
+        """Update the access token.
+
+        This is used when tokens are refreshed by the token manager.
+        """
+        self._access_token = access_token
+
     def _get_headers(self) -> dict[str, str]:
         """Get request headers."""
         return {

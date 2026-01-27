@@ -3,17 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Shopify Store",
-        "description": "Choose how you want to authenticate with Shopify.",
-        "data": {
-          "auth_mode": "Authentication Method"
-        },
-        "data_description": {
-          "auth_mode": "OAuth is recommended for security. Manual token requires creating a custom app."
-        }
-      },
-      "oauth_init": {
-        "title": "Shopify OAuth Setup",
-        "description": "Enter your Shopify app credentials. You'll be redirected to Shopify to authorize access.",
+        "description": "Enter your Shopify custom app credentials. Uses OAuth 2.0 client credentials grant for authentication.",
         "data": {
           "shop_domain": "Shop Domain",
           "client_id": "Client ID",
@@ -21,79 +11,32 @@
         },
         "data_description": {
           "shop_domain": "Your Shopify store domain (e.g., my-store.myshopify.com or just my-store)",
-          "client_id": "Client ID from your Shopify Partners app",
-          "client_secret": "Client Secret from your Shopify Partners app"
-        }
-      },
-      "oauth_authorize": {
-        "title": "Authorize with Shopify",
-        "description": "Please authorize the app in the Shopify window that opened."
-      },
-      "oauth_callback": {
-        "title": "Complete Authorization",
-        "description": "If the automatic redirect didn't work, paste the authorization code and state from the callback URL.",
-        "data": {
-          "code": "Authorization Code",
-          "state": "State"
-        },
-        "data_description": {
-          "code": "The 'code' parameter from the callback URL",
-          "state": "The 'state' parameter from the callback URL (should be: {expected_state})"
-        }
-      },
-      "manual_token": {
-        "title": "Manual Token Entry",
-        "description": "Enter your Shopify custom app access token.",
-        "data": {
-          "shop_domain": "Shop Domain",
-          "access_token": "Admin API Access Token",
-          "api_version": "API Version",
-          "timezone_override": "Timezone Override (optional)",
-          "include_test_orders": "Include Test Orders",
-          "mock_mode": "Mock Mode (for testing)"
-        },
-        "data_description": {
-          "shop_domain": "Your Shopify store domain (e.g., my-store.myshopify.com or just my-store)",
-          "access_token": "Admin API access token from your Shopify custom app",
-          "api_version": "Shopify API version (leave default unless you have specific requirements)",
-          "timezone_override": "Override the store timezone for date calculations (e.g., Australia/Sydney)",
-          "include_test_orders": "Include test orders in counts and revenue calculations",
-          "mock_mode": "Use mock data instead of real API calls (for testing integration)"
+          "client_id": "Client ID from your Shopify custom app",
+          "client_secret": "Client Secret from your Shopify custom app"
         }
       },
       "reauth_confirm": {
         "title": "Re-authenticate Shopify",
-        "description": "The access token for {shop_domain} is no longer valid. Please re-authenticate.",
+        "description": "The access token for {shop_domain} is no longer valid. Please enter your updated credentials.",
         "data": {
-          "access_token": "Admin API Access Token"
-        }
-      },
-      "reauth_oauth": {
-        "title": "Re-authorize with Shopify",
-        "description": "Please authorize the app in the Shopify window that opened."
-      },
-      "reauth_oauth_callback": {
-        "title": "Complete Re-authorization",
-        "description": "If the automatic redirect didn't work, paste the authorization code and state.",
-        "data": {
-          "code": "Authorization Code",
-          "state": "State"
+          "client_id": "Client ID",
+          "client_secret": "Client Secret"
+        },
+        "data_description": {
+          "client_id": "Client ID from your Shopify custom app",
+          "client_secret": "Client Secret from your Shopify custom app"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid credentials or insufficient permissions. Ensure read_orders scope is granted.",
+      "invalid_auth": "Invalid credentials or insufficient permissions. Ensure the app has read_orders scope.",
       "cannot_connect": "Unable to connect to Shopify. Please check your internet connection and shop domain.",
       "invalid_domain": "Shop not found. Please verify the shop domain is correct.",
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {
       "already_configured": "This Shopify store is already configured.",
-      "reauth_successful": "Re-authentication was successful.",
-      "oauth_error": "Shopify returned an error during authorization.",
-      "oauth_state_mismatch": "Security verification failed (state mismatch). Please try again.",
-      "no_auth_code": "No authorization code received from Shopify.",
-      "token_exchange_failed": "Failed to exchange authorization code for access token."
+      "reauth_successful": "Re-authentication was successful."
     }
   },
   "options": {
@@ -111,7 +54,7 @@
           "scan_interval": "How often to fetch data from Shopify (in minutes)",
           "months_lookback": "Number of months to look back when calculating busiest month",
           "include_test_orders": "Include test orders in counts and revenue calculations",
-          "timezone_override": "Override the store timezone for date calculations"
+          "timezone_override": "Override the store timezone for date calculations (e.g., Australia/Sydney)"
         }
       }
     }

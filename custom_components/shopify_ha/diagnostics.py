@@ -5,17 +5,20 @@ from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CLIENT_SECRET
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import ShopifyDataUpdateCoordinator
+from .oauth import ShopifyTokenManager
 
 # Keys to redact from diagnostics
 TO_REDACT = {
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     "access_token",
+    "client_id",
     "client_secret",
     "token",
     "secret",
@@ -26,9 +29,9 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: ShopifyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ShopifyDataUpdateCoordinator = entry_data["coordinator"]
+    token_manager: ShopifyTokenManager | None = entry_data.get("token_manager")
 
     # Build diagnostics data
     data = coordinator.data
@@ -53,6 +56,10 @@ async def async_get_config_entry_diagnostics(
             ),
         },
     }
+
+    # Add token manager info (with masking)
+    if token_manager:
+        diagnostics_data["token_manager"] = token_manager.get_token_info()
 
     if data:
         diagnostics_data["data"] = {
