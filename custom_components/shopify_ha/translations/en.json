@@ -3,7 +3,47 @@
     "step": {
       "user": {
         "title": "Connect to Shopify Store",
-        "description": "Enter your Shopify store details. You'll need a custom app with Admin API access.",
+        "description": "Choose how you want to authenticate with Shopify.",
+        "data": {
+          "auth_mode": "Authentication Method"
+        },
+        "data_description": {
+          "auth_mode": "OAuth is recommended for security. Manual token requires creating a custom app."
+        }
+      },
+      "oauth_init": {
+        "title": "Shopify OAuth Setup",
+        "description": "Enter your Shopify app credentials. You'll be redirected to Shopify to authorize access.",
+        "data": {
+          "shop_domain": "Shop Domain",
+          "client_id": "Client ID",
+          "client_secret": "Client Secret"
+        },
+        "data_description": {
+          "shop_domain": "Your Shopify store domain (e.g., my-store.myshopify.com or just my-store)",
+          "client_id": "Client ID from your Shopify Partners app",
+          "client_secret": "Client Secret from your Shopify Partners app"
+        }
+      },
+      "oauth_authorize": {
+        "title": "Authorize with Shopify",
+        "description": "Please authorize the app in the Shopify window that opened."
+      },
+      "oauth_callback": {
+        "title": "Complete Authorization",
+        "description": "If the automatic redirect didn't work, paste the authorization code and state from the callback URL.",
+        "data": {
+          "code": "Authorization Code",
+          "state": "State"
+        },
+        "data_description": {
+          "code": "The 'code' parameter from the callback URL",
+          "state": "The 'state' parameter from the callback URL (should be: {expected_state})"
+        }
+      },
+      "manual_token": {
+        "title": "Manual Token Entry",
+        "description": "Enter your Shopify custom app access token.",
         "data": {
           "shop_domain": "Shop Domain",
           "access_token": "Admin API Access Token",
@@ -23,21 +63,37 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate Shopify",
-        "description": "The access token for {shop_domain} is no longer valid. Please enter a new access token.",
+        "description": "The access token for {shop_domain} is no longer valid. Please re-authenticate.",
         "data": {
           "access_token": "Admin API Access Token"
+        }
+      },
+      "reauth_oauth": {
+        "title": "Re-authorize with Shopify",
+        "description": "Please authorize the app in the Shopify window that opened."
+      },
+      "reauth_oauth_callback": {
+        "title": "Complete Re-authorization",
+        "description": "If the automatic redirect didn't work, paste the authorization code and state.",
+        "data": {
+          "code": "Authorization Code",
+          "state": "State"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid access token or insufficient permissions. Ensure read_orders scope is granted.",
+      "invalid_auth": "Invalid credentials or insufficient permissions. Ensure read_orders scope is granted.",
       "cannot_connect": "Unable to connect to Shopify. Please check your internet connection and shop domain.",
       "invalid_domain": "Shop not found. Please verify the shop domain is correct.",
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {
       "already_configured": "This Shopify store is already configured.",
-      "reauth_successful": "Re-authentication was successful."
+      "reauth_successful": "Re-authentication was successful.",
+      "oauth_error": "Shopify returned an error during authorization.",
+      "oauth_state_mismatch": "Security verification failed (state mismatch). Please try again.",
+      "no_auth_code": "No authorization code received from Shopify.",
+      "token_exchange_failed": "Failed to exchange authorization code for access token."
     }
   },
   "options": {

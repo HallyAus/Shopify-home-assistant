@@ -5,7 +5,7 @@ from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ACCESS_TOKEN
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
@@ -14,8 +14,11 @@ from .coordinator import ShopifyDataUpdateCoordinator
 # Keys to redact from diagnostics
 TO_REDACT = {
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_SECRET,
     "access_token",
+    "client_secret",
     "token",
+    "secret",
 }
 
 
