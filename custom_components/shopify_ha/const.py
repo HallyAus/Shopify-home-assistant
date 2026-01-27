@@ -9,24 +9,21 @@ DOMAIN: Final = "shopify_ha"
 # Configuration keys
 CONF_SHOP_DOMAIN: Final = "shop_domain"
 CONF_ACCESS_TOKEN: Final = "access_token"
-CONF_REFRESH_TOKEN: Final = "refresh_token"
-CONF_TOKEN_EXPIRES_AT: Final = "token_expires_at"
 CONF_API_VERSION: Final = "api_version"
 CONF_TIMEZONE_OVERRIDE: Final = "timezone_override"
 CONF_INCLUDE_TEST_ORDERS: Final = "include_test_orders"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_MONTHS_LOOKBACK: Final = "months_lookback"
 CONF_MOCK_MODE: Final = "mock_mode"
-CONF_AUTH_MODE: Final = "auth_mode"
+CONF_GRANTED_SCOPES: Final = "granted_scopes"
 
-# Auth modes
-AUTH_MODE_OAUTH: Final = "oauth"
-AUTH_MODE_TOKEN: Final = "token"
-
-# OAuth2 Configuration
+# OAuth2 Authorization Code Flow Configuration
+# Note: Shopify tokens are long-lived and do not require refresh
 OAUTH2_AUTHORIZE_URL_TEMPLATE: Final = "https://{shop}/admin/oauth/authorize"
 OAUTH2_TOKEN_URL_TEMPLATE: Final = "https://{shop}/admin/oauth/access_token"
 OAUTH2_SCOPES: Final = ["read_orders"]
+# This MUST match exactly what is registered in the Shopify app settings
+OAUTH2_REDIRECT_URI: Final = "https://homeassistant.printforge.com.au/auth/external/callback"
 
 # Defaults
 DEFAULT_API_VERSION: Final = "2026-01"

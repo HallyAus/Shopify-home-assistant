@@ -1,12 +1,10 @@
-"""Config flow for Shopify integration."""
+"""Config flow for Shopify Store integration using OAuth Authorization Code flow."""
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -34,13 +32,13 @@ from .api import (
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_API_VERSION,
+    CONF_GRANTED_SCOPES,
     CONF_INCLUDE_TEST_ORDERS,
     CONF_MOCK_MODE,
     CONF_MONTHS_LOOKBACK,
     CONF_SCAN_INTERVAL,
     CONF_SHOP_DOMAIN,
     CONF_TIMEZONE_OVERRIDE,
-    CONF_TOKEN_EXPIRES_AT,
     DEFAULT_API_VERSION,
     DEFAULT_INCLUDE_TEST_ORDERS,
     DEFAULT_MOCK_MODE,
@@ -49,13 +47,16 @@ from .const import (
     DOMAIN,
     ERROR_CANNOT_CONNECT,
     ERROR_INVALID_AUTH,
-    ERROR_INVALID_DOMAIN,
     ERROR_UNKNOWN,
+    OAUTH2_REDIRECT_URI,
 )
 from .oauth import (
     ShopifyTokenError,
-    async_get_client_credentials_token,
+    build_authorization_url,
+    exchange_code_for_token,
+    generate_state,
     normalize_shop_domain,
+    verify_hmac,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,10 +108,13 @@ def get_options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
 
 
 class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Shopify.
+    """Handle a config flow for Shopify using OAuth Authorization Code flow.
 
-    Uses OAuth 2.0 client credentials grant (server-to-server).
-    No browser redirects required.
+    This uses external OAuth where the user is redirected to Shopify to
+    authorize the app, then Shopify redirects back to Home Assistant's
+    callback URL with an authorization code.
+
+    Shopify access tokens are long-lived (no refresh token needed).
     """
 
     VERSION = 1
@@ -120,9 +124,8 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         self._shop_domain: str | None = None
         self._client_id: str | None = None
         self._client_secret: str | None = None
-        self._access_token: str | None = None
-        self._token_expires_at: datetime | None = None
-        self._shop_info: dict[str, Any] | None = None
+        self._oauth_state: str | None = None
+        self._reauth_entry: ConfigEntry | None = None
 
     @staticmethod
     @callback
@@ -133,59 +136,46 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step - collect credentials."""
+        """Handle the initial step - collect shop domain and credentials."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._shop_domain = user_input[CONF_SHOP_DOMAIN]
-            self._client_id = user_input[CONF_CLIENT_ID]
-            self._client_secret = user_input[CONF_CLIENT_SECRET]
-
-            # Normalize shop domain
-            shop = normalize_shop_domain(self._shop_domain)
-            self._shop_domain = shop
+            # Normalize and validate shop domain
+            shop_domain = normalize_shop_domain(user_input[CONF_SHOP_DOMAIN])
+            client_id = user_input[CONF_CLIENT_ID].strip()
+            client_secret = user_input[CONF_CLIENT_SECRET].strip()
 
             # Check if already configured
-            await self.async_set_unique_id(shop)
+            await self.async_set_unique_id(shop_domain)
             self._abort_if_unique_id_configured()
 
-            try:
-                # Get token using client credentials grant
-                token_data = await async_get_client_credentials_token(
-                    hass=self.hass,
-                    shop_domain=shop,
-                    client_id=self._client_id,
-                    client_secret=self._client_secret,
-                )
+            # Store credentials for later steps
+            self._shop_domain = shop_domain
+            self._client_id = client_id
+            self._client_secret = client_secret
 
-                self._access_token = token_data.access_token
-                self._token_expires_at = token_data.expires_at
+            # Generate OAuth state for CSRF protection
+            self._oauth_state = generate_state()
 
-                _LOGGER.info(
-                    "Successfully obtained token for %s (expires: %s)",
-                    shop,
-                    token_data.expires_at.isoformat(),
-                )
+            # Build authorization URL
+            auth_url = build_authorization_url(
+                shop_domain=shop_domain,
+                client_id=client_id,
+                state=self._oauth_state,
+            )
 
-                # Test the connection with a GraphQL query
-                return await self._test_and_create_entry()
+            _LOGGER.debug(
+                "Starting OAuth flow for %s, redirecting to Shopify",
+                shop_domain,
+            )
 
-            except ShopifyTokenError as err:
-                _LOGGER.error("Token request failed: %s", err)
-                errors["base"] = ERROR_INVALID_AUTH
-            except ShopifyAuthError as err:
-                _LOGGER.error("Auth error: %s", err)
-                errors["base"] = ERROR_INVALID_AUTH
-            except ShopifyConnectionError as err:
-                _LOGGER.error("Connection error: %s", err)
-                if "not found" in str(err).lower():
-                    errors["base"] = ERROR_INVALID_DOMAIN
-                else:
-                    errors["base"] = ERROR_CANNOT_CONNECT
-            except Exception:
-                _LOGGER.exception("Unexpected error during setup")
-                errors["base"] = ERROR_UNKNOWN
+            # Use external step to redirect user to Shopify
+            return self.async_external_step(
+                step_id="authorize",
+                url=auth_url,
+            )
 
+        # Show the form to collect credentials
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -202,40 +192,157 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+            description_placeholders={
+                "redirect_uri": OAUTH2_REDIRECT_URI,
+            },
         )
 
-    async def _test_and_create_entry(self) -> ConfigFlowResult:
-        """Test connection with GraphQL and create config entry."""
-        # Test connection with the obtained token
-        client = ShopifyGraphQLClient(
-            shop_domain=self._shop_domain,
-            access_token=self._access_token,
-            api_version=DEFAULT_API_VERSION,
-            session=async_get_clientsession(self.hass),
-        )
+    async def async_step_authorize(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the external authorization step.
 
-        shop_info = await client.test_connection()
-        self._shop_info = {
-            "name": shop_info.name,
-            "currency": shop_info.currency_code,
-            "timezone": shop_info.timezone,
-        }
+        This step waits for the user to complete authorization on Shopify.
+        Home Assistant will receive the callback at /auth/external/callback
+        and then call async_step_callback.
+        """
+        return self.async_external_step_done(next_step_id="callback")
 
-        # Create entry with credentials and token
+    async def async_step_callback(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the OAuth callback from Shopify.
+
+        This is called after the external OAuth callback is received.
+        The callback URL parameters are passed via user_input.
+        """
+        errors: dict[str, str] = {}
+
+        if user_input is None:
+            # Show form to manually enter callback parameters if auto-redirect failed
+            return self.async_show_form(
+                step_id="callback",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("code"): TextSelector(
+                            TextSelectorConfig(type=TextSelectorType.TEXT)
+                        ),
+                        vol.Required("state"): TextSelector(
+                            TextSelectorConfig(type=TextSelectorType.TEXT)
+                        ),
+                        vol.Optional("hmac"): TextSelector(
+                            TextSelectorConfig(type=TextSelectorType.TEXT)
+                        ),
+                        vol.Optional("shop"): TextSelector(
+                            TextSelectorConfig(type=TextSelectorType.TEXT)
+                        ),
+                    }
+                ),
+                errors=errors,
+                description_placeholders={
+                    "expected_state": self._oauth_state or "unknown",
+                },
+            )
+
+        # Verify state matches (CSRF protection)
+        received_state = user_input.get("state", "")
+        if received_state != self._oauth_state:
+            _LOGGER.error(
+                "OAuth state mismatch: expected %s, got %s",
+                self._oauth_state,
+                received_state,
+            )
+            return self.async_abort(reason="oauth_state_mismatch")
+
+        # Verify HMAC if present
+        hmac_value = user_input.get("hmac")
+        if hmac_value and self._client_secret:
+            if not verify_hmac(user_input, self._client_secret):
+                _LOGGER.error("HMAC verification failed")
+                return self.async_abort(reason="invalid_hmac")
+
+        # Get authorization code
+        code = user_input.get("code")
+        if not code:
+            _LOGGER.error("No authorization code in callback")
+            return self.async_abort(reason="no_auth_code")
+
+        # Verify shop matches (if provided)
+        callback_shop = user_input.get("shop")
+        if callback_shop:
+            callback_shop = normalize_shop_domain(callback_shop)
+            if callback_shop != self._shop_domain:
+                _LOGGER.warning(
+                    "Shop mismatch: expected %s, got %s",
+                    self._shop_domain,
+                    callback_shop,
+                )
+                # Use the shop from callback as it's authoritative
+                self._shop_domain = callback_shop
+
+        # Exchange code for access token
+        try:
+            token_data = await exchange_code_for_token(
+                hass=self.hass,
+                shop_domain=self._shop_domain,
+                client_id=self._client_id,
+                client_secret=self._client_secret,
+                code=code,
+            )
+        except ShopifyTokenError as err:
+            _LOGGER.error("Token exchange failed: %s", err)
+            return self.async_abort(reason="token_exchange_failed")
+
+        access_token = token_data["access_token"]
+        granted_scopes = token_data.get("scope", "")
+
+        # Test the connection with the new token
+        try:
+            session = async_get_clientsession(self.hass)
+            client = ShopifyGraphQLClient(
+                shop_domain=self._shop_domain,
+                access_token=access_token,
+                api_version=DEFAULT_API_VERSION,
+                session=session,
+            )
+            shop_info = await client.test_connection()
+            shop_name = shop_info.name
+        except ShopifyAuthError as err:
+            _LOGGER.error("Auth test failed: %s", err)
+            return self.async_abort(reason="invalid_auth")
+        except ShopifyConnectionError as err:
+            _LOGGER.error("Connection test failed: %s", err)
+            return self.async_abort(reason="cannot_connect")
+        except Exception as err:
+            _LOGGER.exception("Unexpected error testing connection: %s", err)
+            return self.async_abort(reason="unknown")
+
+        # Create config entry
+        # Note: client_id and client_secret are stored for potential reauth
+        # Access token is long-lived (no refresh needed)
         data = {
             CONF_SHOP_DOMAIN: self._shop_domain,
             CONF_CLIENT_ID: self._client_id,
             CONF_CLIENT_SECRET: self._client_secret,
-            CONF_ACCESS_TOKEN: self._access_token,
-            CONF_TOKEN_EXPIRES_AT: self._token_expires_at.isoformat(),
+            CONF_ACCESS_TOKEN: access_token,
+            CONF_GRANTED_SCOPES: granted_scopes,
             CONF_API_VERSION: DEFAULT_API_VERSION,
             CONF_TIMEZONE_OVERRIDE: "",
             CONF_INCLUDE_TEST_ORDERS: DEFAULT_INCLUDE_TEST_ORDERS,
             CONF_MOCK_MODE: DEFAULT_MOCK_MODE,
         }
 
+        # Handle reauth
+        if self._reauth_entry:
+            self.hass.config_entries.async_update_entry(
+                self._reauth_entry,
+                data=data,
+            )
+            await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
+
         return self.async_create_entry(
-            title=shop_info.name or self._shop_domain,
+            title=shop_name or self._shop_domain,
             data=data,
             options={
                 CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -246,7 +353,12 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
-        """Handle reauthorization (e.g., if credentials changed)."""
+        """Handle reauthentication - token revoked or invalid."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+
+        # Pre-populate with existing data
         self._shop_domain = entry_data.get(CONF_SHOP_DOMAIN)
         self._client_id = entry_data.get(CONF_CLIENT_ID)
         self._client_secret = entry_data.get(CONF_CLIENT_SECRET)
@@ -256,50 +368,28 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle reauthorization confirmation."""
+        """Handle reauth confirmation - start OAuth flow again."""
         errors: dict[str, str] = {}
-        reauth_entry = self._get_reauth_entry()
 
         if user_input is not None:
-            client_id = user_input.get(CONF_CLIENT_ID, self._client_id)
-            client_secret = user_input.get(CONF_CLIENT_SECRET, self._client_secret)
+            # Update credentials if changed
+            self._client_id = user_input.get(CONF_CLIENT_ID, self._client_id)
+            self._client_secret = user_input.get(CONF_CLIENT_SECRET, self._client_secret)
 
-            try:
-                # Get new token
-                token_data = await async_get_client_credentials_token(
-                    hass=self.hass,
-                    shop_domain=self._shop_domain,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
+            # Generate new OAuth state
+            self._oauth_state = generate_state()
 
-                # Test connection
-                client = ShopifyGraphQLClient(
-                    shop_domain=self._shop_domain,
-                    access_token=token_data.access_token,
-                    session=async_get_clientsession(self.hass),
-                )
-                await client.test_connection()
+            # Build authorization URL
+            auth_url = build_authorization_url(
+                shop_domain=self._shop_domain,
+                client_id=self._client_id,
+                state=self._oauth_state,
+            )
 
-                # Update entry with new credentials and token
-                return self.async_update_reload_and_abort(
-                    reauth_entry,
-                    data={
-                        **reauth_entry.data,
-                        CONF_CLIENT_ID: client_id,
-                        CONF_CLIENT_SECRET: client_secret,
-                        CONF_ACCESS_TOKEN: token_data.access_token,
-                        CONF_TOKEN_EXPIRES_AT: token_data.expires_at.isoformat(),
-                    },
-                )
-
-            except ShopifyTokenError:
-                errors["base"] = ERROR_INVALID_AUTH
-            except ShopifyConnectionError:
-                errors["base"] = ERROR_CANNOT_CONNECT
-            except Exception:
-                _LOGGER.exception("Unexpected error during reauth")
-                errors["base"] = ERROR_UNKNOWN
+            return self.async_external_step(
+                step_id="authorize",
+                url=auth_url,
+            )
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -318,6 +408,7 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "shop_domain": self._shop_domain,
+                "redirect_uri": OAUTH2_REDIRECT_URI,
             },
         )
 

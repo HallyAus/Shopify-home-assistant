@@ -16,8 +16,8 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 ### Key Capabilities
 
 - Uses Shopify's GraphQL Admin API for efficient data fetching
-- **OAuth 2.0 Client Credentials Grant** for secure server-to-server authentication
-- Automatic token refresh (tokens expire every 24 hours)
+- **OAuth 2.0 Authorization Code flow** for secure authentication
+- Long-lived access tokens (no refresh needed)
 - Supports multiple stores (add multiple config entries)
 - Configurable update interval (default: 15 minutes)
 - Smart caching to minimize API calls
@@ -28,6 +28,7 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 ## Requirements
 
 - Home Assistant 2024.12 or newer
+- **Home Assistant must be publicly accessible via HTTPS** (required for OAuth callback)
 - A Shopify store with Admin API access
 - A Shopify custom app with Client ID and Client Secret
 
@@ -51,52 +52,78 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 
 ## Authentication
 
-This integration uses OAuth 2.0 Client Credentials Grant for authentication. This is a secure server-to-server flow that doesn't require browser redirects.
+This integration uses **OAuth 2.0 Authorization Code flow** for authentication. You will be redirected to Shopify to authorize the app.
 
-### Step 1: Create a Custom App in Shopify Admin
+### Important: Redirect URL Configuration
 
-1. Log in to your Shopify admin panel
-2. Go to **Settings** → **Apps and sales channels**
-3. Click **Develop apps** (you may need to enable this first)
-4. Click **Create an app**
-5. Name your app (e.g., "Home Assistant Integration")
-6. Click **Create app**
+Your Home Assistant instance **must be publicly accessible via HTTPS** for OAuth to work.
 
-### Step 2: Configure API Scopes
+The exact redirect URL used by this integration is:
 
-1. In your new app, click **Configure Admin API scopes**
-2. Find and enable **`read_orders`** (under Orders section)
-3. Click **Save**
+```
+https://homeassistant.printforge.com.au/auth/external/callback
+```
 
-### Step 3: Install the App and Get Credentials
+**You must add this exact URL** to your Shopify app's Redirect URLs setting.
 
-1. Click **Install app** to install it on your store
-2. After installation, go to **API credentials**
-3. Copy the **Client ID** (also called API key)
-4. Copy the **Client Secret** (also called API secret key)
+### Step 1: Create a Custom App in Shopify Dev Portal
 
-**Note**: The Client ID and Client Secret are permanent credentials. Unlike access tokens, they don't change unless you regenerate them.
+1. Go to [Shopify Partners](https://partners.shopify.com/) or your Shopify admin
+2. Navigate to **Apps** → **All apps** → **Create app**
+3. Choose **Create app manually**
+4. Name your app (e.g., "Home Assistant Integration")
+5. Click **Create app**
 
-### Step 4: Configure Home Assistant
+### Step 2: Configure the App
+
+1. In your app settings, go to **Configuration**
+2. Under **URLs**, add the redirect URL:
+   ```
+   https://homeassistant.printforge.com.au/auth/external/callback
+   ```
+3. Under **API access**, configure the required scopes:
+   - Enable **`read_orders`** scope
+4. Click **Save**
+
+### Step 3: Get Your Credentials
+
+1. Go to **API credentials** in your app
+2. Copy the **Client ID**
+3. Copy the **Client Secret**
+
+### Step 4: Install the App on Your Store
+
+1. In your app, go to **Overview**
+2. Click **Select store** and choose your store
+3. Click **Install app** to install it on your store
+
+### Step 5: Configure Home Assistant
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
 3. Search for "Shopify Store"
 4. Enter:
-   - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
-   - **Client ID**: From your Shopify custom app
-   - **Client Secret**: From your Shopify custom app
+   - **Shop Domain**: Your store domain (e.g., `printforge` or `printforge.myshopify.com`)
+   - **Client ID**: From your Shopify app
+   - **Client Secret**: From your Shopify app
 5. Click **Submit**
+6. You will be redirected to Shopify to authorize the app
+7. Click **Install app** on Shopify to grant access
+8. You will be redirected back to Home Assistant
 
-The integration will automatically obtain and refresh access tokens using your credentials.
+### How Authentication Works
 
-### How Token Refresh Works
+1. You enter your credentials in Home Assistant
+2. Home Assistant redirects you to Shopify's authorization page
+3. You approve the app on Shopify
+4. Shopify redirects back to Home Assistant with an authorization code
+5. Home Assistant exchanges the code for an access token
+6. The access token is stored securely in your configuration
 
-- Tokens are obtained using OAuth 2.0 Client Credentials Grant
-- Tokens expire after approximately 24 hours (86399 seconds)
-- The integration automatically refreshes tokens 5 minutes before expiry
-- Refreshed tokens are persisted to your configuration
-- No manual intervention required for token management
+**Important Notes:**
+- Shopify access tokens are **long-lived** and do not expire
+- No automatic token refresh is needed
+- If your token is revoked (e.g., app uninstalled), you'll need to re-authorize
 
 ### Required Scopes
 
@@ -174,15 +201,27 @@ Access options via the integration's **Configure** button:
 
 ## Troubleshooting
 
-### Error: Invalid credentials or insufficient permissions (401/403)
+### OAuth redirect fails or shows error
 
-**Cause**: The client credentials are invalid or the app doesn't have the required scopes.
+**Cause**: Redirect URL mismatch or Home Assistant not publicly accessible.
 
 **Solution**:
-1. Verify your Client ID and Client Secret are correct
+1. Verify the redirect URL in your Shopify app exactly matches:
+   ```
+   https://homeassistant.printforge.com.au/auth/external/callback
+   ```
+2. Ensure your Home Assistant is accessible via HTTPS at the configured URL
+3. Check that no firewall is blocking the callback
+
+### Error: Invalid credentials or insufficient permissions (401/403)
+
+**Cause**: The access token is invalid or the app doesn't have the required scopes.
+
+**Solution**:
+1. Re-authorize the app through the integration
 2. Ensure the app has `read_orders` scope enabled
-3. Make sure the app is installed on your store
-4. Try regenerating the Client Secret in Shopify and updating the integration
+3. Make sure the app is still installed on your store
+4. Check if the app was uninstalled and reinstall it
 
 ### Error: Unable to connect to Shopify
 
@@ -212,36 +251,14 @@ Access options via the integration's **Configure** button:
 - A warning will be logged
 - Consider this a limitation for non-AUD stores
 
-**Workaround**: If you need multi-currency support, please open an issue with your use case.
+### Access token revoked
 
-### Timezone issues
-
-**Cause**: Revenue calculations use incorrect timezone.
+**Cause**: The app was uninstalled from the store or the token was revoked.
 
 **Solution**:
-1. Set the "Timezone Override" option to your desired timezone
-2. Use IANA timezone names (e.g., `Australia/Sydney`, `America/New_York`)
-3. If not set, the integration uses your store's timezone from Shopify
-
-### Sensors show "Unknown" or no data
-
-**Cause**: Initial data hasn't loaded or there was an error.
-
-**Solution**:
-1. Check the Home Assistant logs for errors
-2. Verify your credentials have the correct permissions
-3. Try removing and re-adding the integration
-4. Enable debug logging for more details
-
-### Token refresh failed
-
-**Cause**: Client credentials may have been regenerated or the app uninstalled.
-
-**Solution**:
-1. Verify your app is still installed on the store
-2. Check if Client ID/Secret were regenerated in Shopify
-3. Use the "Reconfigure" option to enter new credentials
-4. If needed, delete and re-add the integration
+1. Go to the integration in Home Assistant
+2. Click **Reconfigure** to re-authorize
+3. Complete the OAuth flow again to get a new token
 
 ## Debugging
 
@@ -256,53 +273,34 @@ logger:
     custom_components.shopify_ha: debug
 ```
 
-### Testing Client Credentials Token
-
-You can test your credentials with curl:
-
-```bash
-# Get token using client credentials grant
-curl -X POST \
-  "https://YOUR-STORE.myshopify.com/admin/oauth/access_token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET"
-
-# Response will include:
-# {
-#   "access_token": "shpca_...",
-#   "scope": "read_orders",
-#   "expires_in": 86399
-# }
-```
-
 ### GraphQL API Testing
 
-Once you have a token, test the API:
+You can test the API with your access token:
 
 ```bash
 # Test shop info
 curl -X POST \
-  "https://YOUR-STORE.myshopify.com/admin/api/2024-10/graphql.json" \
+  "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
   -H "Content-Type: application/json" \
   -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
   -d '{"query": "{ shop { name currencyCode ianaTimezone } }"}'
 
 # Test orders count
 curl -X POST \
-  "https://YOUR-STORE.myshopify.com/admin/api/2024-10/graphql.json" \
+  "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
   -H "Content-Type: application/json" \
   -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
   -d '{"query": "{ ordersCount { count } }"}'
 
 # Test unfulfilled orders
 curl -X POST \
-  "https://YOUR-STORE.myshopify.com/admin/api/2024-10/graphql.json" \
+  "https://YOUR-STORE.myshopify.com/admin/api/2026-01/graphql.json" \
   -H "Content-Type: application/json" \
   -H "X-Shopify-Access-Token: YOUR_ACCESS_TOKEN" \
-  -d '{"query": "{ orders(first: 10, query: \"fulfillment_status:unfulfilled AND financial_status:paid\") { edges { node { name createdAt } } } }"}'
+  -d '{"query": "{ orders(first: 10, query: \"status:open AND fulfillment_status:unfulfilled AND financial_status:paid\") { edges { node { name createdAt } } } }"}'
 ```
 
-Replace `YOUR-STORE` with your shop domain, `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET` with your credentials, and `YOUR_ACCESS_TOKEN` with the token from the first curl command.
+Replace `YOUR-STORE` with your shop domain and `YOUR_ACCESS_TOKEN` with your token.
 
 ### Diagnostics
 
@@ -313,22 +311,22 @@ Replace `YOUR-STORE` with your shop domain, `YOUR_CLIENT_ID` and `YOUR_CLIENT_SE
 The diagnostics file includes:
 - Configuration (with credentials redacted)
 - Token status (masked, showing only last 4 characters)
+- Granted scopes
 - Current sensor data
 - Shop information
 - Coordinator status
 
 ## API Usage
 
-This integration uses Shopify's GraphQL Admin API. Here's what happens during each update:
+This integration uses Shopify's GraphQL Admin API version 2026-01. Here's what happens during each update:
 
-1. **Token Check**: Verify token validity, refresh if needed
-2. **Unfulfilled Orders**: Single count query or paginated fetch
-3. **Current Month Revenue**: Paginated query for orders in date range
-4. **Total Orders**: Cached count query (refreshed daily)
-5. **Busiest Month**: Paginated query for historical data
+1. **Unfulfilled Orders**: Query for open, paid, unfulfilled orders
+2. **Current Month Revenue**: Paginated query for orders in date range
+3. **Total Orders**: Cached count query (refreshed daily)
+4. **Busiest Month**: Paginated query for historical data
 
 The integration implements:
-- Automatic token refresh (24-hour token lifetime)
+- Long-lived access tokens (no refresh needed)
 - Automatic rate limiting with backoff
 - Request caching to minimize API calls
 - Concurrent requests where safe

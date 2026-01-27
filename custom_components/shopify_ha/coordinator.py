@@ -1,9 +1,12 @@
-"""DataUpdateCoordinator for Shopify integration."""
+"""DataUpdateCoordinator for Shopify integration.
+
+Shopify access tokens are long-lived and do not require refresh.
+If a token becomes invalid (revoked), reauth is triggered.
+"""
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -22,24 +25,22 @@ from .api import (
     ShopifyRateLimitError,
 )
 from .const import (
-    CONF_ACCESS_TOKEN,
     CONF_MONTHS_LOOKBACK,
     CONF_SCAN_INTERVAL,
-    CONF_TOKEN_EXPIRES_AT,
     DEFAULT_MONTHS_LOOKBACK,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from .oauth import ShopifyTokenError, ShopifyTokenManager
-
-if TYPE_CHECKING:
-    pass
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
-    """Class to manage fetching Shopify data."""
+    """Class to manage fetching Shopify data.
+
+    Uses long-lived Shopify access tokens (no refresh needed).
+    Auth failures trigger reauth flow.
+    """
 
     config_entry: ConfigEntry
 
@@ -48,12 +49,10 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
         hass: HomeAssistant,
         client: ShopifyGraphQLClient,
         config_entry: ConfigEntry,
-        token_manager: ShopifyTokenManager,
     ) -> None:
         """Initialize the coordinator."""
         self.client = client
         self.config_entry = config_entry
-        self._token_manager = token_manager
 
         # Get scan interval from options or config
         scan_interval_minutes = config_entry.options.get(
@@ -97,9 +96,6 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
         _LOGGER.debug("Fetching Shopify data for %s", self.shop_domain)
 
         try:
-            # Ensure we have a valid token before fetching
-            await self._ensure_valid_token()
-
             data = await self.client.fetch_all_data(
                 months_lookback=self._months_lookback
             )
@@ -112,18 +108,13 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
             )
             return data
 
-        except ShopifyTokenError as err:
-            _LOGGER.error("Token error for %s: %s", self.shop_domain, err)
-            raise ConfigEntryAuthFailed(
-                f"Authentication failed for {self.shop_domain}. "
-                "Please check your client credentials."
-            ) from err
-
         except ShopifyAuthError as err:
             _LOGGER.error("Authentication error for %s: %s", self.shop_domain, err)
+            # Shopify tokens are long-lived but can be revoked
+            # Trigger reauth flow
             raise ConfigEntryAuthFailed(
                 f"Authentication failed for {self.shop_domain}. "
-                "Please check your access token and API permissions."
+                "The access token may have been revoked. Please re-authenticate."
             ) from err
 
         except ShopifyRateLimitError as err:
@@ -131,7 +122,7 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
                 "Rate limited by Shopify for %s: %s", self.shop_domain, err
             )
             raise UpdateFailed(
-                f"Rate limited by Shopify. Will retry at next interval."
+                "Rate limited by Shopify. Will retry at next interval."
             ) from err
 
         except ShopifyConnectionError as err:
@@ -147,50 +138,6 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
         except Exception as err:
             _LOGGER.exception("Unexpected error fetching Shopify data: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
-
-    async def _ensure_valid_token(self) -> None:
-        """Ensure we have a valid token, refreshing if necessary.
-
-        This method checks if the token is expired or about to expire,
-        refreshes it if needed, updates the client's access token, and
-        persists the new token to the config entry.
-        """
-        # Get current token state before refresh
-        was_expired = not self._token_manager.has_valid_token
-        old_expires_at = self._token_manager.token_expires_at
-
-        # Get a valid token (will auto-refresh if expired)
-        access_token = await self._token_manager.async_get_token()
-
-        # Update client with the (possibly new) token
-        self.client.update_access_token(access_token)
-
-        # Check if token was refreshed (expiry changed)
-        new_expires_at = self._token_manager.token_expires_at
-
-        if was_expired or (old_expires_at != new_expires_at):
-            # Token was refreshed - persist to config entry
-            _LOGGER.debug(
-                "Token refreshed for %s, persisting to config entry",
-                self.shop_domain,
-            )
-            await self._persist_token(access_token, new_expires_at)
-
-    async def _persist_token(self, access_token: str, expires_at) -> None:
-        """Persist updated token to config entry."""
-        new_data = dict(self.config_entry.data)
-        new_data[CONF_ACCESS_TOKEN] = access_token
-        new_data[CONF_TOKEN_EXPIRES_AT] = expires_at.isoformat()
-
-        self.hass.config_entries.async_update_entry(
-            self.config_entry,
-            data=new_data,
-        )
-        _LOGGER.debug(
-            "Token persisted for %s (expires: %s)",
-            self.shop_domain,
-            expires_at.isoformat(),
-        )
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator and close the client."""
