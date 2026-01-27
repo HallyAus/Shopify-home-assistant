@@ -147,16 +147,24 @@ https://homeassistant.printforge.com.au/auth/external/callback
 ### How Authentication Works
 
 1. You enter your credentials in Home Assistant
-2. Home Assistant redirects you to Shopify's authorization page
-3. You approve the app on Shopify
-4. Shopify redirects back to Home Assistant with an authorization code
-5. Home Assistant exchanges the code for an access token
-6. The access token is stored securely in your configuration
+2. Home Assistant builds an authorization URL with a JWT-encoded state parameter
+3. You are redirected to Shopify's authorization page
+4. You approve the app on Shopify
+5. Shopify redirects back to Home Assistant at `/auth/external/callback`
+6. Home Assistant decodes the JWT state and routes to the correct config flow
+7. Home Assistant exchanges the authorization code for an access token
+8. The access token is stored securely in your configuration
+
+**Technical Details:**
+- The OAuth `state` parameter is JWT-encoded containing the flow ID
+- This allows HA to securely match callbacks to the originating config flow
+- The JWT uses a per-instance secret key for security
 
 **Important Notes:**
 - Shopify access tokens are **long-lived** and do not expire
 - No automatic token refresh is needed
 - If your token is revoked (e.g., app uninstalled), you'll need to re-authorize
+- You MUST access HA via the external URL during setup (not localhost)
 
 ### Required Scopes
 
@@ -234,6 +242,45 @@ Access options via the integration's **Configure** button:
 
 ## Troubleshooting
 
+### "Invalid state. Is My Home Assistant configured to go to the right instance?"
+
+**Cause**: JWT state validation failed. This happens when:
+1. The callback went to a different HA instance than the one that started the flow
+2. HA's external URL is misconfigured
+3. The config flow timed out (10 minute limit)
+4. Reverse proxy headers are not set correctly
+
+**Solution**:
+1. **Check HA External URL**: Ensure Home Assistant's external URL is exactly:
+   ```
+   https://homeassistant.printforge.com.au
+   ```
+   Configure this in Settings → System → Network → External URL
+
+2. **Check Reverse Proxy Headers**: Your proxy MUST set these headers:
+   ```
+   X-Forwarded-Proto: https
+   X-Forwarded-Host: homeassistant.printforge.com.au
+   ```
+
+3. **Access HA via External URL**: When setting up the integration, you MUST access HA via the external URL (not localhost or local IP). The URL in your browser should be `https://homeassistant.printforge.com.au`.
+
+4. **Complete Setup Quickly**: The OAuth flow has a 10-minute timeout. Complete authorization promptly.
+
+5. **Check Debug Logs**: Enable debug logging and look for these messages:
+   ```
+   === SHOPIFY OAUTH DEBUG ===
+   Flow ID: <uuid>
+   Redirect URI: https://homeassistant.printforge.com.au/auth/external/callback
+   ```
+
+   When the callback arrives:
+   ```
+   === SHOPIFY OAUTH CALLBACK ===
+   Host header: homeassistant.printforge.com.au
+   Scheme: https
+   ```
+
 ### OAuth redirect fails or shows error
 
 **Cause**: Redirect URL mismatch or Home Assistant not publicly accessible.
@@ -245,6 +292,7 @@ Access options via the integration's **Configure** button:
    ```
 2. Ensure your Home Assistant is accessible via HTTPS at the configured URL
 3. Check that no firewall is blocking the callback
+4. Make sure you're accessing HA through the external URL, not a local address
 
 ### Error: Invalid credentials or insufficient permissions (401/403)
 

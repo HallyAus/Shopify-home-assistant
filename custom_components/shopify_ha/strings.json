@@ -15,9 +15,13 @@
           "client_secret": "Client Secret from your Shopify custom app"
         }
       },
-      "authorize": {
+      "auth": {
         "title": "Authorize with Shopify",
-        "description": "Please complete the authorization on Shopify. You will be redirected back to Home Assistant after approving the app."
+        "description": "Click the link to authorize with Shopify. You will be redirected back to Home Assistant after approving the app."
+      },
+      "creation": {
+        "title": "Creating Entry",
+        "description": "Exchanging authorization code and creating the integration..."
       },
       "reauth_confirm": {
         "title": "Re-authenticate Shopify",
@@ -36,11 +40,14 @@
       "invalid_auth": "Invalid credentials or insufficient permissions. Ensure the app has read_orders scope.",
       "cannot_connect": "Unable to connect to Shopify. Please check your internet connection and shop domain.",
       "invalid_domain": "Shop not found. Please verify the shop domain is correct.",
+      "external_url_mismatch": "Home Assistant external URL mismatch. OAuth requires HA to be accessible at https://homeassistant.printforge.com.au. Check your external URL configuration and reverse proxy headers.",
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {
       "already_configured": "This Shopify store is already configured.",
       "reauth_successful": "Re-authentication was successful.",
+      "reauth_failed": "Could not find the existing configuration entry.",
+      "oauth_error": "OAuth authorization failed. Please try again.",
       "oauth_state_mismatch": "OAuth state mismatch. Please try again.",
       "invalid_hmac": "HMAC verification failed. The callback may be invalid.",
       "no_auth_code": "No authorization code received from Shopify.",
