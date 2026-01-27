@@ -1,8 +1,18 @@
-"""Config flow for Shopify Store integration using OAuth Authorization Code flow."""
+"""Config flow for Shopify Store integration using OAuth Authorization Code flow.
+
+IMPORTANT: This integration requires Home Assistant to be accessible via HTTPS
+at the configured external URL. The callback URL must exactly match:
+https://homeassistant.printforge.com.au/auth/external/callback
+
+Required reverse proxy headers:
+- X-Forwarded-Proto: https
+- X-Forwarded-Host: homeassistant.printforge.com.au
+"""
 from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 import voluptuous as vol
 from homeassistant.config_entries import (
@@ -45,16 +55,13 @@ from .const import (
     DEFAULT_MONTHS_LOOKBACK,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    ERROR_CANNOT_CONNECT,
-    ERROR_INVALID_AUTH,
-    ERROR_UNKNOWN,
+    OAUTH2_AUTHORIZE_URL_TEMPLATE,
     OAUTH2_REDIRECT_URI,
+    OAUTH2_SCOPES,
 )
 from .oauth import (
     ShopifyTokenError,
-    build_authorization_url,
     exchange_code_for_token,
-    generate_state,
     normalize_shop_domain,
     verify_hmac,
 )
@@ -110,11 +117,11 @@ def get_options_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
 class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Shopify using OAuth Authorization Code flow.
 
-    This uses external OAuth where the user is redirected to Shopify to
-    authorize the app, then Shopify redirects back to Home Assistant's
-    callback URL with an authorization code.
+    Uses Home Assistant's external step flow mechanism. The flow_id is used
+    as the OAuth state parameter so HA can match the callback.
 
-    Shopify access tokens are long-lived (no refresh token needed).
+    IMPORTANT: Home Assistant must be accessible via HTTPS at the external URL.
+    The reverse proxy must set X-Forwarded-Proto and X-Forwarded-Host headers.
     """
 
     VERSION = 1
@@ -124,7 +131,6 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         self._shop_domain: str | None = None
         self._client_id: str | None = None
         self._client_secret: str | None = None
-        self._oauth_state: str | None = None
         self._reauth_entry: ConfigEntry | None = None
 
     @staticmethod
@@ -132,6 +138,34 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> ShopifyOptionsFlow:
         """Get the options flow for this handler."""
         return ShopifyOptionsFlow(config_entry)
+
+    def _build_auth_url(self) -> str:
+        """Build the Shopify OAuth authorization URL.
+
+        Uses self.flow_id as the state parameter - this is CRITICAL for
+        Home Assistant's external flow handling to work correctly.
+        """
+        shop = normalize_shop_domain(self._shop_domain)
+        base_url = OAUTH2_AUTHORIZE_URL_TEMPLATE.format(shop=shop)
+
+        # IMPORTANT: Use flow_id as state - HA uses this to match the callback
+        params = {
+            "client_id": self._client_id,
+            "scope": ",".join(OAUTH2_SCOPES),
+            "redirect_uri": OAUTH2_REDIRECT_URI,
+            "state": self.flow_id,  # HA's flow_id is used as OAuth state
+        }
+
+        auth_url = f"{base_url}?{urlencode(params)}"
+
+        _LOGGER.debug(
+            "Built auth URL for shop=%s, redirect_uri=%s, state(flow_id)=%s",
+            shop,
+            OAUTH2_REDIRECT_URI,
+            self.flow_id,
+        )
+
+        return auth_url
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -154,22 +188,16 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             self._client_id = client_id
             self._client_secret = client_secret
 
-            # Generate OAuth state for CSRF protection
-            self._oauth_state = generate_state()
+            # Build authorization URL using flow_id as state
+            auth_url = self._build_auth_url()
 
-            # Build authorization URL
-            auth_url = build_authorization_url(
-                shop_domain=shop_domain,
-                client_id=client_id,
-                state=self._oauth_state,
-            )
-
-            _LOGGER.debug(
-                "Starting OAuth flow for %s, redirecting to Shopify",
+            _LOGGER.info(
+                "Starting OAuth flow for %s (flow_id=%s)",
                 shop_domain,
+                self.flow_id,
             )
 
-            # Use external step to redirect user to Shopify
+            # Use external step - HA will track this flow by flow_id
             return self.async_external_step(
                 step_id="authorize",
                 url=auth_url,
@@ -200,87 +228,66 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_authorize(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the external authorization step.
+        """Handle the external authorization callback.
 
-        This step waits for the user to complete authorization on Shopify.
-        Home Assistant will receive the callback at /auth/external/callback
-        and then call async_step_callback.
+        This is called by Home Assistant when the OAuth callback is received.
+        HA matches the state parameter to find this flow, then passes the
+        callback query parameters as user_input.
         """
-        return self.async_external_step_done(next_step_id="callback")
-
-    async def async_step_callback(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the OAuth callback from Shopify.
-
-        This is called after the external OAuth callback is received.
-        The callback URL parameters are passed via user_input.
-        """
-        errors: dict[str, str] = {}
+        _LOGGER.debug(
+            "async_step_authorize called (flow_id=%s), user_input keys: %s",
+            self.flow_id,
+            list(user_input.keys()) if user_input else None,
+        )
 
         if user_input is None:
-            # Show form to manually enter callback parameters if auto-redirect failed
-            return self.async_show_form(
-                step_id="callback",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required("code"): TextSelector(
-                            TextSelectorConfig(type=TextSelectorType.TEXT)
-                        ),
-                        vol.Required("state"): TextSelector(
-                            TextSelectorConfig(type=TextSelectorType.TEXT)
-                        ),
-                        vol.Optional("hmac"): TextSelector(
-                            TextSelectorConfig(type=TextSelectorType.TEXT)
-                        ),
-                        vol.Optional("shop"): TextSelector(
-                            TextSelectorConfig(type=TextSelectorType.TEXT)
-                        ),
-                    }
-                ),
-                errors=errors,
-                description_placeholders={
-                    "expected_state": self._oauth_state or "unknown",
-                },
+            # No callback data yet - this shouldn't happen normally
+            # The external step is waiting for the callback
+            _LOGGER.warning(
+                "async_step_authorize called without user_input (flow_id=%s)",
+                self.flow_id,
             )
+            return self.async_external_step_done(next_step_id="authorize")
 
-        # Verify state matches (CSRF protection)
-        received_state = user_input.get("state", "")
-        if received_state != self._oauth_state:
-            _LOGGER.error(
-                "OAuth state mismatch: expected %s, got %s",
-                self._oauth_state,
-                received_state,
-            )
-            return self.async_abort(reason="oauth_state_mismatch")
-
-        # Verify HMAC if present
+        # We have the callback data from Shopify
+        # Verify HMAC if present (Shopify includes this for security)
         hmac_value = user_input.get("hmac")
         if hmac_value and self._client_secret:
             if not verify_hmac(user_input, self._client_secret):
-                _LOGGER.error("HMAC verification failed")
+                _LOGGER.error("HMAC verification failed for flow_id=%s", self.flow_id)
                 return self.async_abort(reason="invalid_hmac")
 
         # Get authorization code
         code = user_input.get("code")
         if not code:
-            _LOGGER.error("No authorization code in callback")
+            _LOGGER.error(
+                "No authorization code in callback (flow_id=%s). "
+                "Received params: %s",
+                self.flow_id,
+                [k for k in user_input.keys() if k not in ("hmac",)],
+            )
             return self.async_abort(reason="no_auth_code")
 
-        # Verify shop matches (if provided)
+        # Log received shop (without sensitive data)
         callback_shop = user_input.get("shop")
         if callback_shop:
             callback_shop = normalize_shop_domain(callback_shop)
+            _LOGGER.debug(
+                "Callback shop=%s, expected=%s",
+                callback_shop,
+                self._shop_domain,
+            )
+            # Use the shop from callback as it's authoritative
             if callback_shop != self._shop_domain:
-                _LOGGER.warning(
-                    "Shop mismatch: expected %s, got %s",
-                    self._shop_domain,
+                _LOGGER.info(
+                    "Using shop from callback: %s (was: %s)",
                     callback_shop,
+                    self._shop_domain,
                 )
-                # Use the shop from callback as it's authoritative
                 self._shop_domain = callback_shop
 
         # Exchange code for access token
+        _LOGGER.debug("Exchanging authorization code for access token")
         try:
             token_data = await exchange_code_for_token(
                 hass=self.hass,
@@ -296,6 +303,11 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
         access_token = token_data["access_token"]
         granted_scopes = token_data.get("scope", "")
 
+        _LOGGER.debug(
+            "Token exchange successful, granted scopes: %s",
+            granted_scopes,
+        )
+
         # Test the connection with the new token
         try:
             session = async_get_clientsession(self.hass)
@@ -307,6 +319,10 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             shop_info = await client.test_connection()
             shop_name = shop_info.name
+            _LOGGER.info(
+                "Successfully connected to Shopify store: %s",
+                shop_name,
+            )
         except ShopifyAuthError as err:
             _LOGGER.error("Auth test failed: %s", err)
             return self.async_abort(reason="invalid_auth")
@@ -318,8 +334,6 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="unknown")
 
         # Create config entry
-        # Note: client_id and client_secret are stored for potential reauth
-        # Access token is long-lived (no refresh needed)
         data = {
             CONF_SHOP_DOMAIN: self._shop_domain,
             CONF_CLIENT_ID: self._client_id,
@@ -376,14 +390,13 @@ class ShopifyConfigFlow(ConfigFlow, domain=DOMAIN):
             self._client_id = user_input.get(CONF_CLIENT_ID, self._client_id)
             self._client_secret = user_input.get(CONF_CLIENT_SECRET, self._client_secret)
 
-            # Generate new OAuth state
-            self._oauth_state = generate_state()
+            # Build authorization URL using flow_id as state
+            auth_url = self._build_auth_url()
 
-            # Build authorization URL
-            auth_url = build_authorization_url(
-                shop_domain=self._shop_domain,
-                client_id=self._client_id,
-                state=self._oauth_state,
+            _LOGGER.info(
+                "Starting reauth OAuth flow for %s (flow_id=%s)",
+                self._shop_domain,
+                self.flow_id,
             )
 
             return self.async_external_step(
