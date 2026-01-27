@@ -29,7 +29,7 @@ OAUTH2_TOKEN_URL_TEMPLATE: Final = "https://{shop}/admin/oauth/access_token"
 OAUTH2_SCOPES: Final = ["read_orders"]
 
 # Defaults
-DEFAULT_API_VERSION: Final = "2024-10"
+DEFAULT_API_VERSION: Final = "2026-01"
 DEFAULT_SCAN_INTERVAL: Final = 15  # minutes
 DEFAULT_MONTHS_LOOKBACK: Final = 24
 DEFAULT_INCLUDE_TEST_ORDERS: Final = False
@@ -91,6 +91,7 @@ query OrdersCount($query: String) {
 }
 """
 
+# Corrected for API 2026-01: Use displayFulfillmentStatus instead of fulfillmentStatus
 GRAPHQL_UNFULFILLED_ORDERS_QUERY: Final = """
 query UnfulfilledOrders($first: Int!, $after: String, $query: String) {
   orders(first: $first, after: $after, query: $query) {
@@ -103,7 +104,7 @@ query UnfulfilledOrders($first: Int!, $after: String, $query: String) {
         id
         name
         createdAt
-        fulfillmentStatus
+        displayFulfillmentStatus
         displayFinancialStatus
       }
     }
@@ -111,6 +112,9 @@ query UnfulfilledOrders($first: Int!, $after: String, $query: String) {
 }
 """
 
+# Revenue query for API 2026-01
+# Uses currentTotalPriceSet (reflects edits/returns/refunds) for accurate net revenue
+# Prefer shopMoney for consistent store currency
 GRAPHQL_ORDERS_REVENUE_QUERY: Final = """
 query OrdersRevenue($first: Int!, $after: String, $query: String) {
   orders(first: $first, after: $after, query: $query) {
@@ -124,22 +128,22 @@ query OrdersRevenue($first: Int!, $after: String, $query: String) {
         name
         createdAt
         displayFinancialStatus
+        displayFulfillmentStatus
         cancelledAt
+        closed
         currentTotalPriceSet {
-          presentmentMoney {
+          shopMoney {
             amount
             currencyCode
           }
+        }
+        netPaymentSet {
           shopMoney {
             amount
             currencyCode
           }
         }
         totalRefundedSet {
-          presentmentMoney {
-            amount
-            currencyCode
-          }
           shopMoney {
             amount
             currencyCode
