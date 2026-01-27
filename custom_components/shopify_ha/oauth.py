@@ -1,86 +1,53 @@
-"""OAuth2 implementation for Shopify."""
+"""OAuth2 Client Credentials implementation for Shopify."""
 from __future__ import annotations
 
-import hashlib
 import logging
-import secrets
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (
-    OAUTH2_AUTHORIZE_URL_TEMPLATE,
-    OAUTH2_SCOPES,
-    OAUTH2_TOKEN_URL_TEMPLATE,
-)
+from .const import OAUTH2_TOKEN_URL_TEMPLATE
 
 _LOGGER = logging.getLogger(__name__)
 
-
-class ShopifyOAuth2Error(Exception):
-    """Base exception for Shopify OAuth2 errors."""
-
-
-class ShopifyOAuth2AuthorizationError(ShopifyOAuth2Error):
-    """Authorization error."""
+# Token refresh buffer - refresh 5 minutes before expiry
+TOKEN_REFRESH_BUFFER = timedelta(minutes=5)
 
 
-class ShopifyOAuth2TokenError(ShopifyOAuth2Error):
-    """Token exchange error."""
+class ShopifyAuthError(Exception):
+    """Base exception for Shopify authentication errors."""
 
 
-def generate_state() -> str:
-    """Generate a secure random state parameter."""
-    return secrets.token_urlsafe(32)
+class ShopifyTokenError(ShopifyAuthError):
+    """Token request error."""
 
 
-def generate_nonce() -> str:
-    """Generate a secure random nonce."""
-    return secrets.token_urlsafe(16)
+@dataclass
+class TokenData:
+    """Token data from Shopify."""
+
+    access_token: str
+    expires_at: datetime
+    scope: str
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if token is expired or will expire soon."""
+        return datetime.now() >= (self.expires_at - TOKEN_REFRESH_BUFFER)
+
+    @property
+    def masked_token(self) -> str:
+        """Return masked token for logging (last 4 chars only)."""
+        if len(self.access_token) > 4:
+            return f"...{self.access_token[-4:]}"
+        return "****"
 
 
-def build_authorization_url(
-    shop_domain: str,
-    client_id: str,
-    redirect_uri: str,
-    state: str,
-    scopes: list[str] | None = None,
-) -> str:
-    """Build the Shopify OAuth2 authorization URL.
-
-    Args:
-        shop_domain: The shop domain (e.g., my-store.myshopify.com)
-        client_id: The Shopify app client ID
-        redirect_uri: The callback URL for authorization
-        state: A random state string for CSRF protection
-        scopes: List of OAuth scopes (defaults to read_orders)
-
-    Returns:
-        The full authorization URL
-    """
-    if scopes is None:
-        scopes = OAUTH2_SCOPES
-
-    # Normalize shop domain
-    shop = _normalize_shop_domain(shop_domain)
-
-    base_url = OAUTH2_AUTHORIZE_URL_TEMPLATE.format(shop=shop)
-
-    params = {
-        "client_id": client_id,
-        "scope": ",".join(scopes),
-        "redirect_uri": redirect_uri,
-        "state": state,
-        "grant_options[]": "per-user",  # Request online access token
-    }
-
-    return f"{base_url}?{urlencode(params)}"
-
-
-def _normalize_shop_domain(domain: str) -> str:
+def normalize_shop_domain(domain: str) -> str:
     """Normalize the shop domain to my-store.myshopify.com format."""
     domain = domain.strip().lower()
 
@@ -101,70 +68,37 @@ def _normalize_shop_domain(domain: str) -> str:
     return domain
 
 
-def verify_hmac(query_params: dict[str, str], client_secret: str) -> bool:
-    """Verify the HMAC signature from Shopify callback.
-
-    Args:
-        query_params: The query parameters from the callback
-        client_secret: The app's client secret
-
-    Returns:
-        True if the HMAC is valid, False otherwise
-    """
-    hmac_value = query_params.get("hmac")
-    if not hmac_value:
-        return False
-
-    # Create a copy without hmac for verification
-    params_to_verify = {k: v for k, v in query_params.items() if k != "hmac"}
-
-    # Sort and create message string
-    sorted_params = sorted(params_to_verify.items())
-    message = "&".join(f"{k}={v}" for k, v in sorted_params)
-
-    # Calculate HMAC
-    calculated_hmac = hashlib.sha256(
-        client_secret.encode("utf-8")
-    )
-    calculated_hmac.update(message.encode("utf-8"))
-
-    # Use hmac.compare_digest for timing-safe comparison
-    import hmac as hmac_module
-    return hmac_module.compare_digest(
-        hmac_value,
-        calculated_hmac.hexdigest()
-    )
-
-
-async def exchange_code_for_token(
+async def async_get_client_credentials_token(
     hass: HomeAssistant,
     shop_domain: str,
     client_id: str,
     client_secret: str,
-    code: str,
-) -> dict[str, Any]:
-    """Exchange authorization code for access token.
+) -> TokenData:
+    """Get access token using client credentials grant.
+
+    This is the server-to-server OAuth flow for Shopify custom apps.
+    Tokens expire after ~24 hours (86399 seconds).
 
     Args:
         hass: Home Assistant instance
-        shop_domain: The shop domain
+        shop_domain: The shop domain (e.g., my-store.myshopify.com)
         client_id: The app client ID
         client_secret: The app client secret
-        code: The authorization code from Shopify
 
     Returns:
-        Dict containing access_token and scope
+        TokenData with access_token, expires_at, and scope
 
     Raises:
-        ShopifyOAuth2TokenError: If token exchange fails
+        ShopifyTokenError: If token request fails
     """
-    shop = _normalize_shop_domain(shop_domain)
+    shop = normalize_shop_domain(shop_domain)
     token_url = OAUTH2_TOKEN_URL_TEMPLATE.format(shop=shop)
 
+    # Client credentials grant uses form-urlencoded body
     payload = {
+        "grant_type": "client_credentials",
         "client_id": client_id,
         "client_secret": client_secret,
-        "code": code,
     }
 
     session = async_get_clientsession(hass)
@@ -172,58 +106,103 @@ async def exchange_code_for_token(
     try:
         async with session.post(
             token_url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
+            data=payload,  # form-urlencoded
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=aiohttp.ClientTimeout(total=30),
         ) as response:
+            response_text = await response.text()
+
             if response.status == 400:
-                error_data = await response.json()
-                error_msg = error_data.get("error_description", error_data.get("error", "Unknown error"))
-                raise ShopifyOAuth2TokenError(f"Token exchange failed: {error_msg}")
-
-            if response.status == 401:
-                raise ShopifyOAuth2TokenError("Invalid client credentials")
-
-            if response.status != 200:
-                text = await response.text()
-                raise ShopifyOAuth2TokenError(
-                    f"Token exchange failed with status {response.status}: {text}"
+                _LOGGER.error(
+                    "Token request failed (400): %s",
+                    response_text[:200],
+                )
+                raise ShopifyTokenError(
+                    "Invalid request - check client_id and client_secret"
                 )
 
-            data = await response.json()
+            if response.status == 401:
+                _LOGGER.error("Token request failed (401): Invalid credentials")
+                raise ShopifyTokenError(
+                    "Invalid client credentials - verify client_id and client_secret"
+                )
 
-            if "access_token" not in data:
-                raise ShopifyOAuth2TokenError("No access token in response")
+            if response.status == 403:
+                _LOGGER.error(
+                    "Token request failed (403): %s",
+                    response_text[:200],
+                )
+                raise ShopifyTokenError(
+                    "Access forbidden - ensure app is installed on the store"
+                )
 
-            _LOGGER.debug(
-                "Successfully obtained access token for shop %s with scopes: %s",
-                shop,
-                data.get("scope", "unknown"),
+            if response.status != 200:
+                _LOGGER.error(
+                    "Token request failed (%d): %s",
+                    response.status,
+                    response_text[:200],
+                )
+                raise ShopifyTokenError(
+                    f"Token request failed with status {response.status}"
+                )
+
+            try:
+                data = await response.json()
+            except Exception as err:
+                _LOGGER.error("Failed to parse token response: %s", err)
+                raise ShopifyTokenError("Invalid JSON response from Shopify") from err
+
+            access_token = data.get("access_token")
+            if not access_token:
+                _LOGGER.error("No access_token in response: %s", list(data.keys()))
+                raise ShopifyTokenError("No access token in response")
+
+            # expires_in is in seconds (typically 86399 = ~24 hours)
+            expires_in = data.get("expires_in", 86399)
+            expires_at = datetime.now() + timedelta(seconds=expires_in)
+
+            scope = data.get("scope", "")
+
+            token_data = TokenData(
+                access_token=access_token,
+                expires_at=expires_at,
+                scope=scope,
             )
 
-            return {
-                "access_token": data["access_token"],
-                "scope": data.get("scope", ""),
-                "shop_domain": shop,
-            }
+            _LOGGER.info(
+                "Successfully obtained token for %s (expires in %d seconds, scope: %s)",
+                shop,
+                expires_in,
+                scope,
+            )
+
+            return token_data
 
     except aiohttp.ClientError as err:
-        raise ShopifyOAuth2TokenError(f"Network error during token exchange: {err}") from err
+        _LOGGER.error("Network error during token request: %s", err)
+        raise ShopifyTokenError(f"Network error: {err}") from err
 
 
-class ShopifyOAuth2Session:
-    """Manage OAuth2 session for a Shopify store."""
+class ShopifyTokenManager:
+    """Manage Shopify OAuth tokens with automatic refresh.
+
+    Tokens are obtained using the client credentials grant and expire
+    after ~24 hours. This manager handles automatic refresh.
+    """
 
     def __init__(
         self,
         hass: HomeAssistant,
         shop_domain: str,
-        access_token: str,
+        client_id: str,
+        client_secret: str,
     ) -> None:
-        """Initialize the OAuth2 session."""
+        """Initialize the token manager."""
         self._hass = hass
-        self._shop_domain = _normalize_shop_domain(shop_domain)
-        self._access_token = access_token
+        self._shop_domain = normalize_shop_domain(shop_domain)
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token_data: TokenData | None = None
 
     @property
     def shop_domain(self) -> str:
@@ -231,16 +210,89 @@ class ShopifyOAuth2Session:
         return self._shop_domain
 
     @property
-    def access_token(self) -> str:
-        """Return the access token."""
-        return self._access_token
+    def has_valid_token(self) -> bool:
+        """Check if we have a valid (non-expired) token."""
+        return self._token_data is not None and not self._token_data.is_expired
 
-    async def async_ensure_token_valid(self) -> None:
-        """Ensure the token is valid.
+    @property
+    def access_token(self) -> str | None:
+        """Return the current access token if valid."""
+        if self._token_data and not self._token_data.is_expired:
+            return self._token_data.access_token
+        return None
 
-        Note: Shopify offline access tokens don't expire, so this is a no-op.
-        For online access tokens, you would need to handle refresh here.
+    @property
+    def token_expires_at(self) -> datetime | None:
+        """Return token expiration time."""
+        return self._token_data.expires_at if self._token_data else None
+
+    def set_token(self, access_token: str, expires_at: datetime, scope: str = "") -> None:
+        """Set token from stored data (e.g., from config entry)."""
+        self._token_data = TokenData(
+            access_token=access_token,
+            expires_at=expires_at,
+            scope=scope,
+        )
+        _LOGGER.debug(
+            "Loaded stored token for %s (expires: %s)",
+            self._shop_domain,
+            expires_at.isoformat(),
+        )
+
+    async def async_get_token(self) -> str:
+        """Get a valid access token, refreshing if necessary.
+
+        Returns:
+            Valid access token
+
+        Raises:
+            ShopifyTokenError: If unable to get a valid token
         """
-        # Shopify offline access tokens don't expire
-        # If we're using online tokens in the future, implement refresh here
-        pass
+        if self._token_data is None or self._token_data.is_expired:
+            _LOGGER.debug(
+                "Token missing or expired for %s, refreshing...",
+                self._shop_domain,
+            )
+            await self.async_refresh_token()
+
+        return self._token_data.access_token
+
+    async def async_refresh_token(self) -> TokenData:
+        """Refresh the access token using client credentials grant.
+
+        Returns:
+            New TokenData
+
+        Raises:
+            ShopifyTokenError: If refresh fails
+        """
+        _LOGGER.debug("Refreshing token for %s", self._shop_domain)
+
+        self._token_data = await async_get_client_credentials_token(
+            hass=self._hass,
+            shop_domain=self._shop_domain,
+            client_id=self._client_id,
+            client_secret=self._client_secret,
+        )
+
+        _LOGGER.info(
+            "Token refreshed for %s (expires: %s)",
+            self._shop_domain,
+            self._token_data.expires_at.isoformat(),
+        )
+
+        return self._token_data
+
+    def get_token_info(self) -> dict[str, Any]:
+        """Get token info for diagnostics (with masked token)."""
+        if self._token_data:
+            return {
+                "has_token": True,
+                "token_last4": self._token_data.masked_token,
+                "expires_at": self._token_data.expires_at.isoformat(),
+                "is_expired": self._token_data.is_expired,
+                "scope": self._token_data.scope,
+            }
+        return {
+            "has_token": False,
+        }

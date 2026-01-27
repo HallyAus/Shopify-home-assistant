@@ -16,7 +16,8 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 ### Key Capabilities
 
 - Uses Shopify's GraphQL Admin API for efficient data fetching
-- **Two authentication methods**: OAuth (recommended) or manual access token
+- **OAuth 2.0 Client Credentials Grant** for secure server-to-server authentication
+- Automatic token refresh (tokens expire every 24 hours)
 - Supports multiple stores (add multiple config entries)
 - Configurable update interval (default: 15 minutes)
 - Smart caching to minimize API calls
@@ -28,9 +29,7 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 
 - Home Assistant 2024.12 or newer
 - A Shopify store with Admin API access
-- Either:
-  - A Shopify Partners app with Client ID and Client Secret (OAuth method), OR
-  - A custom app access token with `read_orders` scope (manual method)
+- A Shopify custom app with Client ID and Client Secret
 
 ## Installation
 
@@ -50,63 +49,11 @@ A custom Home Assistant integration that connects to the Shopify Admin API and e
 2. Copy it to your Home Assistant's `custom_components` directory
 3. Restart Home Assistant
 
-## Authentication Methods
+## Authentication
 
-This integration supports two authentication methods:
+This integration uses OAuth 2.0 Client Credentials Grant for authentication. This is a secure server-to-server flow that doesn't require browser redirects.
 
-### Method 1: OAuth (Recommended)
-
-OAuth is the recommended method as it's more secure and follows Shopify's best practices.
-
-#### Step 1: Create a Shopify Partners App
-
-1. Go to [Shopify Partners](https://partners.shopify.com/) and log in
-2. Click **Apps** → **Create app**
-3. Choose **Create app manually**
-4. Enter an app name (e.g., "Home Assistant Integration")
-5. Click **Create**
-
-#### Step 2: Configure the App
-
-1. In your app settings, go to **Configuration**
-2. Set the **App URL** to your Home Assistant external URL (e.g., `https://homeassistant.yourdomain.com`)
-3. Add **Allowed redirection URL(s)**:
-   - `https://homeassistant.yourdomain.com/auth/external/callback`
-4. Under **Access scopes**, add:
-   - `read_orders`
-5. Click **Save**
-
-#### Step 3: Get Client Credentials
-
-1. Go to **Client credentials** in your app
-2. Copy the **Client ID**
-3. Copy the **Client secret**
-
-#### Step 4: Install the App on Your Store
-
-1. In the app settings, go to **Test your app**
-2. Select your development store
-3. Click **Install app**
-
-#### Step 5: Configure Home Assistant
-
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for "Shopify Store"
-4. Select **OAuth (Recommended)**
-5. Enter:
-   - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
-   - **Client ID**: From Shopify Partners
-   - **Client Secret**: From Shopify Partners
-6. You'll be redirected to Shopify to authorize
-7. Approve the permissions
-8. You'll be redirected back to Home Assistant
-
-### Method 2: Manual Access Token
-
-Use this method if you prefer a simpler setup or don't have access to Shopify Partners.
-
-#### Step 1: Create a Custom App in Shopify Admin
+### Step 1: Create a Custom App in Shopify Admin
 
 1. Log in to your Shopify admin panel
 2. Go to **Settings** → **Apps and sales channels**
@@ -115,28 +62,41 @@ Use this method if you prefer a simpler setup or don't have access to Shopify Pa
 5. Name your app (e.g., "Home Assistant Integration")
 6. Click **Create app**
 
-#### Step 2: Configure API Scopes
+### Step 2: Configure API Scopes
 
 1. In your new app, click **Configure Admin API scopes**
 2. Find and enable **`read_orders`** (under Orders section)
 3. Click **Save**
 
-#### Step 3: Get Your Access Token
+### Step 3: Install the App and Get Credentials
 
 1. Click **Install app** to install it on your store
-2. Click **Reveal token once** to see your Admin API access token
-3. **IMPORTANT**: Copy and save this token securely - it's only shown once!
+2. After installation, go to **API credentials**
+3. Copy the **Client ID** (also called API key)
+4. Copy the **Client Secret** (also called API secret key)
 
-#### Step 4: Configure Home Assistant
+**Note**: The Client ID and Client Secret are permanent credentials. Unlike access tokens, they don't change unless you regenerate them.
+
+### Step 4: Configure Home Assistant
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
 3. Search for "Shopify Store"
-4. Select **Manual Access Token**
-5. Enter:
+4. Enter:
    - **Shop Domain**: Your store domain (e.g., `my-store` or `my-store.myshopify.com`)
-   - **Admin API Access Token**: The token you copied
-6. Click **Submit**
+   - **Client ID**: From your Shopify custom app
+   - **Client Secret**: From your Shopify custom app
+5. Click **Submit**
+
+The integration will automatically obtain and refresh access tokens using your credentials.
+
+### How Token Refresh Works
+
+- Tokens are obtained using OAuth 2.0 Client Credentials Grant
+- Tokens expire after approximately 24 hours (86399 seconds)
+- The integration automatically refreshes tokens 5 minutes before expiry
+- Refreshed tokens are persisted to your configuration
+- No manual intervention required for token management
 
 ### Required Scopes
 
@@ -151,13 +111,8 @@ Use this method if you prefer a simpler setup or don't have access to Shopify Pa
 | Option | Description |
 |--------|-------------|
 | Shop Domain | Your Shopify store domain |
-| Client ID | OAuth client ID (OAuth method only) |
-| Client Secret | OAuth client secret (OAuth method only) |
-| Access Token | Admin API token (manual method only) |
-| API Version | Shopify API version (default: 2024-10) |
-| Timezone Override | Override store timezone for calculations |
-| Include Test Orders | Include test orders in counts |
-| Mock Mode | Use mock data for testing |
+| Client ID | OAuth client ID from your custom app |
+| Client Secret | OAuth client secret from your custom app |
 
 ### Options (Configurable After Setup)
 
@@ -219,24 +174,15 @@ Access options via the integration's **Configure** button:
 
 ## Troubleshooting
 
-### OAuth: Redirect URL Mismatch
+### Error: Invalid credentials or insufficient permissions (401/403)
 
-**Cause**: The redirect URL in Home Assistant doesn't match what's configured in Shopify.
-
-**Solution**:
-1. Ensure your Home Assistant external URL is correctly set in **Settings** → **System** → **Network**
-2. Add the exact redirect URL to your Shopify app's allowed redirection URLs
-3. The format should be: `https://your-ha-domain/auth/external/callback`
-
-### Error: Invalid access token or insufficient permissions (401/403)
-
-**Cause**: The access token is invalid or doesn't have the required scopes.
+**Cause**: The client credentials are invalid or the app doesn't have the required scopes.
 
 **Solution**:
-1. Verify your access token/credentials are correct
+1. Verify your Client ID and Client Secret are correct
 2. Ensure the app has `read_orders` scope enabled
-3. For OAuth: Re-authorize the app
-4. For manual: Generate a new access token
+3. Make sure the app is installed on your store
+4. Try regenerating the Client Secret in Shopify and updating the integration
 
 ### Error: Unable to connect to Shopify
 
@@ -287,6 +233,16 @@ Access options via the integration's **Configure** button:
 3. Try removing and re-adding the integration
 4. Enable debug logging for more details
 
+### Token refresh failed
+
+**Cause**: Client credentials may have been regenerated or the app uninstalled.
+
+**Solution**:
+1. Verify your app is still installed on the store
+2. Check if Client ID/Secret were regenerated in Shopify
+3. Use the "Reconfigure" option to enter new credentials
+4. If needed, delete and re-add the integration
+
 ## Debugging
 
 ### Enable Debug Logging
@@ -300,9 +256,28 @@ logger:
     custom_components.shopify_ha: debug
 ```
 
+### Testing Client Credentials Token
+
+You can test your credentials with curl:
+
+```bash
+# Get token using client credentials grant
+curl -X POST \
+  "https://YOUR-STORE.myshopify.com/admin/oauth/access_token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET"
+
+# Response will include:
+# {
+#   "access_token": "shpca_...",
+#   "scope": "read_orders",
+#   "expires_in": 86399
+# }
+```
+
 ### GraphQL API Testing
 
-You can test your token with curl:
+Once you have a token, test the API:
 
 ```bash
 # Test shop info
@@ -327,7 +302,7 @@ curl -X POST \
   -d '{"query": "{ orders(first: 10, query: \"fulfillment_status:unfulfilled AND financial_status:paid\") { edges { node { name createdAt } } } }"}'
 ```
 
-Replace `YOUR-STORE` with your shop domain and `YOUR_ACCESS_TOKEN` with your token.
+Replace `YOUR-STORE` with your shop domain, `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET` with your credentials, and `YOUR_ACCESS_TOKEN` with the token from the first curl command.
 
 ### Diagnostics
 
@@ -337,6 +312,7 @@ Replace `YOUR-STORE` with your shop domain and `YOUR_ACCESS_TOKEN` with your tok
 
 The diagnostics file includes:
 - Configuration (with credentials redacted)
+- Token status (masked, showing only last 4 characters)
 - Current sensor data
 - Shop information
 - Coordinator status
@@ -345,12 +321,14 @@ The diagnostics file includes:
 
 This integration uses Shopify's GraphQL Admin API. Here's what happens during each update:
 
-1. **Unfulfilled Orders**: Single count query or paginated fetch
-2. **Current Month Revenue**: Paginated query for orders in date range
-3. **Total Orders**: Cached count query (refreshed daily)
-4. **Busiest Month**: Paginated query for historical data
+1. **Token Check**: Verify token validity, refresh if needed
+2. **Unfulfilled Orders**: Single count query or paginated fetch
+3. **Current Month Revenue**: Paginated query for orders in date range
+4. **Total Orders**: Cached count query (refreshed daily)
+5. **Busiest Month**: Paginated query for historical data
 
 The integration implements:
+- Automatic token refresh (24-hour token lifetime)
 - Automatic rate limiting with backoff
 - Request caching to minimize API calls
 - Concurrent requests where safe
