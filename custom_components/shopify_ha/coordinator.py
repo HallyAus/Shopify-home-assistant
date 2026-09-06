@@ -122,9 +122,15 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
 
         Historical sensor values have always been raw shop-currency amounts; older
         releases only mislabeled their unit as AUD. Therefore this is a metadata
-        correction, not a numeric conversion.
+        correction, not a numeric conversion. Recorder is optional in Home Assistant,
+        so skip metadata migration when it is not loaded.
         """
         if not currency or currency == self._statistics_currency:
+            return
+        if "recorder" not in self.hass.config.components:
+            _LOGGER.debug(
+                "Recorder is not loaded; skipping Shopify statistics currency migration"
+            )
             return
 
         registry = er.async_get(self.hass)
