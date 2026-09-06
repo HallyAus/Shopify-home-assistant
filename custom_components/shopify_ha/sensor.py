@@ -448,6 +448,16 @@ class ShopifySensor(CoordinatorEntity[ShopifyDataUpdateCoordinator], SensorEntit
         )
 
     @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the Shopify store currency for monetary sensors."""
+        if (
+            self.entity_description.device_class == SensorDeviceClass.MONETARY
+            and self.coordinator.data is not None
+        ):
+            return self.coordinator.data.currency or TARGET_CURRENCY
+        return self.entity_description.native_unit_of_measurement
+
+    @property
     def native_value(self) -> Any:
         """Return the state of the sensor."""
         if self.coordinator.data is None:
