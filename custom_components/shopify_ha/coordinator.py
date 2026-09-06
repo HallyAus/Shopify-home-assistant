@@ -96,6 +96,11 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
         _LOGGER.debug("Fetching Shopify data for %s", self.shop_domain)
 
         try:
+            # Refresh shop metadata on every coordinator cycle. fetch_all_data caches
+            # ShopInfo for timezone calculations, so refreshing first keeps the store
+            # currency (and timezone) correct if the merchant changes either setting
+            # while the Home Assistant config entry remains loaded.
+            await self.client.test_connection()
             data = await self.client.fetch_all_data(
                 months_lookback=self._months_lookback
             )
