@@ -99,6 +99,11 @@ class ShopifyDataUpdateCoordinator(DataUpdateCoordinator[ShopifyData]):
             data = await self.client.fetch_all_data(
                 months_lookback=self._months_lookback
             )
+            # fetch_all_data historically defaulted the currency field to AUD.
+            # Shopify's shop info is authoritative and already contains the
+            # configured store currency, so preserve that value for HA sensors.
+            if data.shop_info and data.shop_info.currency_code:
+                data.currency = data.shop_info.currency_code
             _LOGGER.debug(
                 "Fetched data: unfulfilled=%d, revenue=%s, total=%d, busiest=%s",
                 data.unfulfilled_orders_count,
