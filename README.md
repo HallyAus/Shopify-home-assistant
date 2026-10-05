@@ -24,7 +24,7 @@ If you find this integration useful, consider supporting me!
 | Icon | Sensor | Description |
 |------|--------|-------------|
 | `mdi:package-variant` | **Unfulfilled Orders** | Orders paid but not yet fulfilled |
-| `mdi:cash-multiple` | **Current Month Revenue** | Revenue for the current month (AUD) |
+| `mdi:cash-multiple` | **Current Month Revenue** | Revenue for the current month (store currency) |
 | `mdi:cart-check` | **Total Orders** | All-time order count |
 | `mdi:chart-line` | **Busiest Month** | Highest revenue month historically |
 | `mdi:cart-arrow-down` | **Today's Orders** | Orders placed today |
@@ -240,7 +240,7 @@ All sensors include these common attributes:
 
 #### `mdi:cash-multiple` sensor.\<store\>_shopify_current_month_revenue_aud
 
-**State**: Current month's revenue in AUD
+**State**: Current month's revenue in the store currency
 
 **Additional Attributes**: `currency`, `start_date`, `end_date`, `order_count`
 
@@ -264,7 +264,7 @@ All sensors include these common attributes:
 
 #### `mdi:cash-register` sensor.\<store\>_shopify_today_revenue_aud
 
-**State**: Revenue from today's orders in AUD
+**State**: Revenue from today's orders in the store currency
 
 **Additional Attributes**: `currency`, `order_count`, `start_date`, `end_date`, `period`
 
@@ -278,7 +278,7 @@ All sensors include these common attributes:
 
 #### `mdi:cash-sync` sensor.\<store\>_shopify_this_week_revenue_aud
 
-**State**: Revenue for the current week in AUD
+**State**: Revenue for the current week in the store currency
 
 **Additional Attributes**: `currency`, `order_count`, `start_date`, `end_date`, `week_number`, `period`
 
@@ -286,7 +286,7 @@ All sensors include these common attributes:
 
 #### `mdi:cash-marker` sensor.\<store\>_shopify_average_order_value_aud
 
-**State**: Average order value for the current month in AUD
+**State**: Average order value for the current month in the store currency
 
 **Additional Attributes**: `currency`, `order_count`, `period`
 
@@ -302,7 +302,7 @@ All sensors include these common attributes:
 
 #### `mdi:calendar-star` sensor.\<store\>_shopify_year_to_date_revenue_aud
 
-**State**: Year-to-date revenue in AUD
+**State**: Year-to-date revenue in the store currency
 
 **Additional Attributes**: `currency`, `order_count`, `start_date`, `year`, `period`
 
@@ -314,7 +314,7 @@ All sensors include these common attributes:
 
 #### `mdi:chart-areaspline` sensor.\<store\>_shopify_last_30_days_revenue_aud
 
-**State**: Revenue from the last 30 days in AUD
+**State**: Revenue from the last 30 days in the store currency
 
 **Additional Attributes**: `currency`, `order_count`, `start_date`, `period`
 
@@ -399,14 +399,9 @@ All sensors include these common attributes:
 2. The integration will automatically back off and retry
 3. Wait a few minutes for rate limits to reset
 
-### Currency shows non-AUD values
+### Currency and legacy entity names
 
-**Cause**: Your Shopify store uses a different currency.
-
-**Limitation**: This integration targets AUD currency. If your store uses a different currency:
-- The raw amounts will still be shown (not converted)
-- A warning will be logged
-- Consider this a limitation for non-AUD stores
+Monetary sensors report the currency configured in your Shopify store. The integration does not convert amounts. Existing entity names ending in `_aud` are retained so automations and dashboards keep working; check the sensor unit or `currency` attribute for the actual currency.
 
 ### Access token revoked
 
